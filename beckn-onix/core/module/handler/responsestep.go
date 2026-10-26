@@ -174,10 +174,12 @@ func sendNack(ctx context.Context, w http.ResponseWriter, err error) []byte {
 	return nack(ctx, w, becknErr, httpStatus, bodyStatus)
 }
 
-// isAtLeastV2 reports whether the request uses Beckn protocol v2.0.0 or later.
+// isAtLeastV2 reports whether the request uses Beckn protocol v2.0.0 or later
+// behaviour. ONDC requests are excluded even when their version is >= 2 (ONDC
+// TRV10 is version 2.0.0 on Beckn core 1.1.0), so they keep the Beckn 1.x envelope.
 func isAtLeastV2(ctx context.Context) bool {
 	v, _ := ctx.Value(model.ContextKeyProtocolVersion).(string)
-	return model.IsAtLeastV2(v)
+	return model.IsAtLeastV2(v) && !model.IsONDC(ctx)
 }
 
 // msgID returns the message ID stored in the context, or empty string if absent.
@@ -265,7 +267,7 @@ func (a *ackSignerStep) signBodyAndSetHeader(ctx *model.StepContext, body []byte
 // (called before sendNack) because the pipelineErr guard prevents
 // response steps from running on pipeline failures.
 func (a *ackSignerStep) RunOnResponse(ctx *model.StepContext, rctx *model.ResponseStepContext) error {
-	if !model.IsAtLeastV2(ctx.ProtocolVersion) {
+	if !ctx.IsBecknV2() {
 		return nil
 	}
 	if len(ctx.SubID) == 0 {
@@ -380,7 +382,7 @@ func (v *validateAckSignatureStep) RunOnResponse(ctx *model.StepContext, rctx *m
 	if rctx == nil {
 		return nil
 	}
-	if !model.IsAtLeastV2(ctx.ProtocolVersion) {
+	if !ctx.IsBecknV2() {
 		return nil
 	}
 

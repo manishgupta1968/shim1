@@ -1,0 +1,30 @@
+{
+  "context": {
+    "domain": "ONDC:TRV10",
+    "action": "cancel",
+    "version": "2.0.0",
+    "bap_id": "bap.mobility.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S",
+    "location": {
+      "country": {
+        "code": "IND"
+      },
+      "city": {
+        "code": "std:080"
+      }
+    },
+    "bpp_id": "bpp.mobility.example.com",
+    "bpp_uri": "{{BPP_URI}}"
+  },
+  "message": {
+    "order_id": "O1",
+    "cancellation_reason_id": "7",
+    "descriptor": {
+      "code": "SOFT_CANCEL"
+    }
+  }
+}

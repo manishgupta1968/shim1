@@ -1333,3 +1333,38 @@ func TestProxy_QueryParamsForwardedToUpstream(t *testing.T) {
 		t.Errorf("upstream received RawQuery = %q, want %q", capturedRawQuery, "subscriptionId=test123&page=2")
 	}
 }
+
+// ONDC TRV10 sends context.version 2.0.0 (not core_version). A module configured for ONDC
+// (reqpreprocessor "ondc: true") marks every request, so TRV10 gets the ONDC format and no
+// Beckn v2 behaviour; the same version without the mark is Beckn v2.
+func TestStepCtx_ONDCMarkOverridesVersion2(t *testing.T) {
+	const body = `{"context":{"domain":"ONDC:TRV10","version":"2.0.0","action":"search"}}`
+	tests := []struct {
+		name     string
+		marked   bool
+		wantONDC bool
+		wantV2   bool
+	}{
+		{"module configured for ONDC", true, true, false},
+		{"module not configured for ONDC", false, false, true},
+	}
+	h := &stdHandler{role: model.RoleBAP}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/bap/caller/search", strings.NewReader(body))
+			if tt.marked {
+				req = req.WithContext(context.WithValue(req.Context(), model.ContextKeyONDC, true))
+			}
+			sc, err := h.stepCtx(req, http.Header{})
+			if err != nil {
+				t.Fatalf("stepCtx() err = %v", err)
+			}
+			if got := model.IsONDC(sc.Context); got != tt.wantONDC {
+				t.Errorf("IsONDC = %v, want %v", got, tt.wantONDC)
+			}
+			if got := sc.IsBecknV2(); got != tt.wantV2 {
+				t.Errorf("IsBecknV2 = %v, want %v", got, tt.wantV2)
+			}
+		})
+	}
+}

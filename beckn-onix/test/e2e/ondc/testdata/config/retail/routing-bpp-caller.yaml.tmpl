@@ -1,0 +1,16 @@
+routingRules:
+  # Callbacks go to the BAP named in context.bap_uri.
+  - domain: "ONDC:RET14"
+    version: "1.2.5"
+    targetType: bap
+    endpoints:
+      - on_search
+      - on_select
+      - on_init
+      - on_confirm
+      - on_status
+      - on_track
+      - on_update
+      - on_cancel
+      - on_rating
+      - on_support

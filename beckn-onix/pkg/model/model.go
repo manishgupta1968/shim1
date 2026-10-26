@@ -322,10 +322,18 @@ type StepContext struct {
 	SubID                string
 	Role                 Role
 	RespHeader           http.Header
-	ProtocolVersion      string // Protocol version parsed from context.version (e.g. "2.0.0")
+	ProtocolVersion      string // Protocol version parsed from context.version (or ONDC Retail's context.core_version), e.g. "2.0.0"
 	MessageID            string // Message ID parsed from context.messageId in the request body
 	InboundAuthSignature string // Raw Base64 signature from the inbound Authorization header's signature="..." attribute
 	IsCallerHandler      bool   // True when the handler is a Caller (outbound); false for Receiver (inbound)
+}
+
+// IsBecknV2 reports whether the request follows Beckn v2 behaviour: the v2 ACK/NACK
+// envelope, ACK signing and request-signature binding. ONDC requests are excluded even
+// when their version is >= 2: ONDC TRV10 uses context.version 2.0.0 on Beckn core 1.1.0
+// and so keeps the Beckn 1.x wire format.
+func (ctx *StepContext) IsBecknV2() bool {
+	return IsAtLeastV2(ctx.ProtocolVersion) && !IsONDC(ctx.Context)
 }
 
 // WithContext updates the existing StepContext with a new context.

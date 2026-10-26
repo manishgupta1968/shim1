@@ -1,0 +1,138 @@
+# One ONIX process playing one network participant ({{ .Role }}) for the ONDC end-to-end tests.
+# It hosts the participant's two modules:
+#   caller   - the participant's own app posts unsigned messages here; ONIX validates the schema,
+#              finds the route and signs the message (Authorization header).
+#   receiver - the counterparty posts signed messages here; ONIX verifies the signature against the
+#              registry, validates the schema and forwards the message to the participant's backend.
+# Rendered by the tests (Go text/template); nothing here is specific to one ONDC domain.
+appName: "onix-e2e-{{ .Role }}"
+log:
+  level: debug
+  destinations:
+    - type: stdout
+  contextKeys:
+    - transaction_id
+    - message_id
+    - subscriber_id
+    - module_id
+http:
+  port: "{{ .Port }}"
+  timeout:
+    read: 30
+    write: 30
+    idle: 30
+pluginManager:
+  root: "{{ .PluginDir }}"
+  becknConstants:
+    disableRemoteRefresh: true
+modules:
+  - name: {{ .Role }}TxnReceiver
+    path: /{{ .Role }}/receiver/
+    handler:
+      type: std
+      role: {{ .Role }}
+      subscriberId: "{{ .SubscriberID }}"
+      httpClientConfig:
+        maxIdleConns: 100
+        maxIdleConnsPerHost: 50
+        idleConnTimeout: 30s
+        responseHeaderTimeout: 10s
+      plugins:
+        registry:
+          id: registry
+          config:
+            url: "{{ .RegistryURL }}"
+            retry_max: "1"
+            retry_wait_min: 10ms
+            retry_wait_max: 50ms
+        keyManager:
+          id: simplekeymanager
+          config:
+            subscriberId: "{{ .SubscriberID }}"
+            keyId: "{{ .KeyID }}"
+            signingPrivateKey: "{{ .SigningPrivateKey }}"
+            signingPublicKey: "{{ .SigningPublicKey }}"
+            encrPrivateKey: "{{ .EncrPrivateKey }}"
+            encrPublicKey: "{{ .EncrPublicKey }}"
+        cache:
+          id: cache
+          config:
+            addr: "{{ .RedisAddr }}"
+        schemaValidator:
+          id: schemavalidator
+          config:
+            schemaDir: "{{ .SchemaDir }}"
+        signValidator:
+          id: signvalidator
+        signer:
+          id: signer
+        router:
+          id: router
+          config:
+            routingConfig: "{{ .ReceiverRouting }}"
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transaction_id,message_id
+              role: {{ .Role }}
+              # Answer every refusal in the ONDC shape, even for a body that cannot be read at all.
+              ondc: "true"
+      steps:
+        - validateSign
+        - validateSchema
+        - addRoute
+
+  - name: {{ .Role }}TxnCaller
+    path: /{{ .Role }}/caller/
+    handler:
+      type: std
+      role: {{ .Role }}
+      subscriberId: "{{ .SubscriberID }}"
+      httpClientConfig:
+        maxIdleConns: 100
+        maxIdleConnsPerHost: 50
+        idleConnTimeout: 30s
+        responseHeaderTimeout: 10s
+      plugins:
+        # The registry is required by the key manager even on the caller path.
+        registry:
+          id: registry
+          config:
+            url: "{{ .RegistryURL }}"
+            retry_max: "1"
+            retry_wait_min: 10ms
+            retry_wait_max: 50ms
+        keyManager:
+          id: simplekeymanager
+          config:
+            subscriberId: "{{ .SubscriberID }}"
+            keyId: "{{ .KeyID }}"
+            signingPrivateKey: "{{ .SigningPrivateKey }}"
+            signingPublicKey: "{{ .SigningPublicKey }}"
+            encrPrivateKey: "{{ .EncrPrivateKey }}"
+            encrPublicKey: "{{ .EncrPublicKey }}"
+        cache:
+          id: cache
+          config:
+            addr: "{{ .RedisAddr }}"
+        schemaValidator:
+          id: schemavalidator
+          config:
+            schemaDir: "{{ .SchemaDir }}"
+        signer:
+          id: signer
+        router:
+          id: router
+          config:
+            routingConfig: "{{ .CallerRouting }}"
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transaction_id,message_id
+              role: {{ .Role }}
+              # Answer every refusal in the ONDC shape, even for a body that cannot be read at all.
+              ondc: "true"
+      steps:
+        - validateSchema
+        - addRoute
+        - sign

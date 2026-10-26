@@ -234,7 +234,7 @@ func (s *validateSignStep) validateHeaders(ctx *model.StepContext) error {
 //   - "request-signature" absent from the Authorization headers attribute (provider-initiated)
 //   - action cannot be extracted from the body
 func (s *validateSignStep) lookupCallbackRequestSig(ctx *model.StepContext, authHeader string) (string, error) {
-	if s.payloadStore == nil || !model.IsAtLeastV2(ctx.ProtocolVersion) || !authHeaderIncludesRequestSig(authHeader) {
+	if s.payloadStore == nil || !ctx.IsBecknV2() || !authHeaderIncludesRequestSig(authHeader) {
 		return "", nil
 	}
 	action := strings.TrimPrefix(extractBecknAction(ctx.Body), "on_")

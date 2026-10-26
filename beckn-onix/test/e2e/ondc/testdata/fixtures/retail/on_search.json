@@ -1,0 +1,413 @@
+{
+  "context": {
+    "domain": "ONDC:RET14",
+    "country": "IND",
+    "city": "std:080",
+    "action": "on_search",
+    "core_version": "1.2.5",
+    "bap_id": "bap.retail.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "bpp_id": "bpp.retail.example.com",
+    "bpp_uri": "{{BPP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "catalog": {
+      "bpp/descriptor": {
+        "name": "Kaveri",
+        "symbol": "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg",
+        "short_desc": "Kaveri",
+        "long_desc": "Kaveri",
+        "images": [
+          "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg"
+        ],
+        "tags": [
+          {
+            "code": "bpp_terms",
+            "list": [
+              {
+                "code": "np_type",
+                "value": "ISN"
+              }
+            ]
+          }
+        ]
+      },
+      "bpp/providers": [
+        {
+          "id": "bpp.retail.example.com",
+          "descriptor": {
+            "name": "Kaveri",
+            "symbol": "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg",
+            "short_desc": "Kaveri",
+            "long_desc": "Kaveri",
+            "images": [
+              "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg"
+            ]
+          },
+          "locations": [
+            {
+              "id": "L-BLR-01",
+              "gps": "12.9716,77.5946",
+              "address": {
+                "street": "100 Feet Road, Indiranagar",
+                "locality": "100 Feet Road, Indiranagar",
+                "city": "Bengaluru",
+                "state": "Karnataka",
+                "area_code": "560038"
+              },
+              "time": {
+                "timestamp": "2025-07-10T08:43:19.138Z",
+                "label": "enable",
+                "range": {
+                  "start": "0000",
+                  "end": "2359"
+                },
+                "days": "1,2,3,4,5,6,7",
+                "schedule": {
+                  "holidays": []
+                }
+              }
+            }
+          ],
+          "categories": [
+            {
+              "id": "8ec0d7c4",
+              "descriptor": {
+                "name": "Kaveri Pulse Pro"
+              },
+              "tags": [
+                {
+                  "code": "type",
+                  "list": [
+                    {
+                      "code": "type",
+                      "value": "variant_group"
+                    }
+                  ]
+                },
+                {
+                  "code": "attr",
+                  "list": [
+                    {
+                      "code": "name",
+                      "value": "item.tags.attribute.colour"
+                    },
+                    {
+                      "code": "seq",
+                      "value": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "items": [
+            {
+              "id": "I-PULSE-PRO-BLACK",
+              "time": {
+                "timestamp": "2025-07-10T08:43:19.137Z",
+                "label": "enable"
+              },
+              "parent_item_id": "8ec0d7c4",
+              "quantity": {
+                "available": {
+                  "count": "99"
+                },
+                "maximum": {
+                  "count": "99"
+                },
+                "unitized": {
+                  "measure": {
+                    "unit": "unit",
+                    "value": "1"
+                  }
+                }
+              },
+              "descriptor": {
+                "name": "Kaveri Pulse Pro Jet Black",
+                "code": "3:8906086574942",
+                "symbol": "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg",
+                "short_desc": "Product Information\nModel Number : PLS-PRO\nGeneric Product Name : Smartwatch\nScreen Size : 4.98 cm (1.96 inch)\nType : Bluetooth Calling Smartwatch\nWater Resistance : IP67\nCountry of Origin : India\nSales Package\nNet Quantity : 1\nInside the Box: 1N Smartwatch, 1N Magnetic Charger, 1N Warranty Card, 1N User Manual\nCustomer Care & Warranty\nPolicy: 12 months replacement guarantee for manufacturing defects.\nCustomer Care: support@kaverigadgets.example.com / +91 8012345678",
+                "long_desc": "Infinite Display: 1.96 inch display with an almost bezel-less full touch screen.\nBluetooth Calling: answer and make calls from your wrist.\nHealth: heart rate, SpO2 and sleep monitoring.\nMulti-Sports Mode: track running, cycling, swimming and more.",
+                "images": [
+                  "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg",
+                  "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg"
+                ]
+              },
+              "price": {
+                "currency": "INR",
+                "value": "1599.00",
+                "maximum_value": "5499.00"
+              },
+              "related": false,
+              "category_id": "Smart Watch",
+              "fulfillment_id": "DeliveryFulfillment",
+              "location_id": "L-BLR-01",
+              "@ondc/org/returnable": true,
+              "@ondc/org/seller_pickup_return": true,
+              "@ondc/org/return_window": "P7D",
+              "@ondc/org/cancellable": true,
+              "@ondc/org/time_to_ship": "P1D",
+              "@ondc/org/available_on_cod": true,
+              "@ondc/org/contact_details_consumer_care": "Kaveri,support@kaverigadgets.example.com,08012345678",
+              "@ondc/org/statutory_reqs_packaged_commodities": {
+                "manufacturer_or_packer_name": "Kaveri Gadgets Pvt Ltd",
+                "manufacturer_or_packer_address": "100 Feet Road, Indiranagar, Bengaluru 560038",
+                "common_or_generic_name_of_commodity": "smart watch",
+                "month_year_of_manufacture_packing_import": "Refer pack for details"
+              },
+              "tags": [
+                {
+                  "code": "origin",
+                  "list": [
+                    {
+                      "code": "country",
+                      "value": "IND"
+                    }
+                  ]
+                },
+                {
+                  "code": "attribute",
+                  "list": [
+                    {
+                      "code": "brand",
+                      "value": "kaveri"
+                    },
+                    {
+                      "code": "model",
+                      "value": "Frost Pro"
+                    },
+                    {
+                      "code": "colour",
+                      "value": "#FFFFFF"
+                    },
+                    {
+                      "code": "colour_name",
+                      "value": "white"
+                    },
+                    {
+                      "code": "screen_size",
+                      "value": "1.96"
+                    },
+                    {
+                      "code": "connectivity",
+                      "value": "Bluetooth"
+                    },
+                    {
+                      "code": "weight",
+                      "value": "175.00"
+                    },
+                    {
+                      "code": "height",
+                      "value": "10.00"
+                    },
+                    {
+                      "code": "length",
+                      "value": "10.00"
+                    },
+                    {
+                      "code": "breadth",
+                      "value": "5.80"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "I-PULSE-PRO-ORANGE",
+              "time": {
+                "timestamp": "2025-07-10T08:43:19.137Z",
+                "label": "enable"
+              },
+              "parent_item_id": "8ec0d7c4",
+              "quantity": {
+                "available": {
+                  "count": "99"
+                },
+                "maximum": {
+                  "count": "99"
+                },
+                "unitized": {
+                  "measure": {
+                    "unit": "unit",
+                    "value": "1"
+                  }
+                }
+              },
+              "descriptor": {
+                "name": "Kaveri Pulse Pro Orange",
+                "code": "3:8906086574966",
+                "symbol": "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg",
+                "short_desc": "Product Information\nModel Number : PLS-PRO\nGeneric Product Name : Smartwatch\nScreen Size : 4.98 cm (1.96 inch)\nType : Bluetooth Calling Smartwatch\nWater Resistance : IP67\nCountry of Origin : India\nSales Package\nNet Quantity : 1\nInside the Box: 1N Smartwatch, 1N Magnetic Charger, 1N Warranty Card, 1N User Manual\nCustomer Care & Warranty\nPolicy: 12 months replacement guarantee for manufacturing defects.\nCustomer Care: support@kaverigadgets.example.com / +91 8012345678",
+                "long_desc": "Infinite Display: 1.96 inch display with an almost bezel-less full touch screen.\nBluetooth Calling: answer and make calls from your wrist.\nHealth: heart rate, SpO2 and sleep monitoring.\nMulti-Sports Mode: track running, cycling, swimming and more.",
+                "images": [
+                  "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg",
+                  "https://cdn.kaverigadgets.example.com/images/pulse-pro.jpg"
+                ]
+              },
+              "price": {
+                "currency": "INR",
+                "value": "1499.00",
+                "maximum_value": "5499.00"
+              },
+              "related": false,
+              "category_id": "Smart Watch",
+              "fulfillment_id": "DeliveryFulfillment",
+              "location_id": "L-BLR-01",
+              "@ondc/org/returnable": true,
+              "@ondc/org/seller_pickup_return": true,
+              "@ondc/org/return_window": "P7D",
+              "@ondc/org/cancellable": true,
+              "@ondc/org/time_to_ship": "P1D",
+              "@ondc/org/available_on_cod": true,
+              "@ondc/org/contact_details_consumer_care": "Kaveri,support@kaverigadgets.example.com,08012345678",
+              "@ondc/org/statutory_reqs_packaged_commodities": {
+                "manufacturer_or_packer_name": "Kaveri Gadgets Pvt Ltd",
+                "manufacturer_or_packer_address": "100 Feet Road, Indiranagar, Bengaluru 560038",
+                "common_or_generic_name_of_commodity": "smart watch",
+                "month_year_of_manufacture_packing_import": "Refer pack for details"
+              },
+              "tags": [
+                {
+                  "code": "origin",
+                  "list": [
+                    {
+                      "code": "country",
+                      "value": "IND"
+                    }
+                  ]
+                },
+                {
+                  "code": "attribute",
+                  "list": [
+                    {
+                      "code": "brand",
+                      "value": "kaveri"
+                    },
+                    {
+                      "code": "model",
+                      "value": "Frost Pro"
+                    },
+                    {
+                      "code": "colour",
+                      "value": "#CC5500"
+                    },
+                    {
+                      "code": "colour_name",
+                      "value": "burnt orange"
+                    },
+                    {
+                      "code": "screen_size",
+                      "value": "1.96"
+                    },
+                    {
+                      "code": "connectivity",
+                      "value": "Bluetooth"
+                    },
+                    {
+                      "code": "weight",
+                      "value": "175.00"
+                    },
+                    {
+                      "code": "height",
+                      "value": "10.00"
+                    },
+                    {
+                      "code": "length",
+                      "value": "10.00"
+                    },
+                    {
+                      "code": "breadth",
+                      "value": "5.80"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "fulfillments": [
+            {
+              "id": "DeliveryFulfillment",
+              "type": "Delivery",
+              "contact": {
+                "phone": "08012345678",
+                "email": "support@kaverigadgets.example.com"
+              }
+            }
+          ],
+          "ttl": "PT24H",
+          "tags": [
+            {
+              "code": "serviceability",
+              "list": [
+                {
+                  "code": "location",
+                  "value": "L-BLR-01"
+                },
+                {
+                  "code": "category",
+                  "value": "Smart Watch"
+                },
+                {
+                  "code": "type",
+                  "value": "12"
+                },
+                {
+                  "code": "val",
+                  "value": "IND"
+                },
+                {
+                  "code": "unit",
+                  "value": "country"
+                }
+              ]
+            },
+            {
+              "code": "timing",
+              "list": [
+                {
+                  "code": "type",
+                  "value": "All"
+                },
+                {
+                  "code": "location",
+                  "value": "L-BLR-01"
+                },
+                {
+                  "code": "day_from",
+                  "value": "1"
+                },
+                {
+                  "code": "day_to",
+                  "value": "7"
+                },
+                {
+                  "code": "time_from",
+                  "value": "0000"
+                },
+                {
+                  "code": "time_to",
+                  "value": "2359"
+                }
+              ]
+            }
+          ],
+          "time": {
+            "timestamp": "2025-07-10T08:43:19.135Z",
+            "label": "enable"
+          }
+        }
+      ],
+      "bpp/fulfillments": [
+        {
+          "id": "DeliveryFulfillment",
+          "type": "Delivery"
+        }
+      ]
+    }
+  }
+}

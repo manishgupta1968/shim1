@@ -1168,3 +1168,62 @@ func TestRouteBodylessPublisherUnaffectedByQueryParams(t *testing.T) {
 		t.Errorf("expected route.URL to be nil for publisher route, got %v", route.URL)
 	}
 }
+
+// TestRouteCoreVersionFallback tests that ONDC Retail contexts, which carry the
+// protocol version in core_version rather than version, route by core_version.
+func TestRouteCoreVersionFallback(t *testing.T) {
+	ctx := context.Background()
+	router, _, rulesFilePath := setupRouter(t, "ondc_retail_bap_caller.yaml")
+	defer os.RemoveAll(filepath.Dir(rulesFilePath))
+
+	tests := []struct {
+		name     string
+		endpoint string
+		body     string
+		wantURL  string
+		wantErr  string
+	}{
+		{
+			name:     "core_version selects the url route",
+			endpoint: "search",
+			body:     `{"context": {"domain": "ONDC:RET14", "core_version": "1.2.5"}}`,
+			wantURL:  "https://gateway.example.com/bg/search",
+		},
+		{
+			name:     "core_version selects the bpp route",
+			endpoint: "select",
+			body:     `{"context": {"domain": "ONDC:RET14", "core_version": "1.2.5", "bpp_uri": "https://bpp.example.com/receiver"}}`,
+			wantURL:  "https://bpp.example.com/receiver/select",
+		},
+		{
+			name:     "version wins over core_version",
+			endpoint: "search",
+			body:     `{"context": {"domain": "ONDC:RET14", "version": "1.2.5", "core_version": "9.9.9"}}`,
+			wantURL:  "https://gateway.example.com/bg/search",
+		},
+		{
+			name:     "unknown core_version has no rules",
+			endpoint: "search",
+			body:     `{"context": {"domain": "ONDC:RET14", "core_version": "1.2.0"}}`,
+			wantErr:  "no routing rules found for domain ONDC:RET14 version 1.2.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			route, err := router.Route(ctx, &url.URL{Path: tt.endpoint}, []byte(tt.body))
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Route() err = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Route() err = %v, want nil", err)
+			}
+			if got := route.URL.String(); got != tt.wantURL {
+				t.Errorf("Route() url = %q, want %q", got, tt.wantURL)
+			}
+		})
+	}
+}

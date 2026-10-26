@@ -247,7 +247,7 @@ func (h *stdHandler) signNackResponse(ctx *model.StepContext, err error) {
 	if h.ackSigner == nil {
 		return
 	}
-	if !model.IsAtLeastV2(ctx.ProtocolVersion) {
+	if !ctx.IsBecknV2() {
 		return
 	}
 	if len(ctx.SubID) == 0 {

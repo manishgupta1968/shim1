@@ -1,0 +1,17 @@
+routingRules:
+  - domain: "ONDC:RET14"
+    version: "1.2.5"
+    targetType: url
+    target:
+      url: "{{ .BPPBackendURL }}/ondc"
+    endpoints:
+      - search
+      - select
+      - init
+      - confirm
+      - status
+      - track
+      - update
+      - cancel
+      - rating
+      - support

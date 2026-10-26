@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -304,4 +305,28 @@ func TestWrapExtractContextErr(t *testing.T) {
 			t.Errorf("Error() = %q, want it to contain becknErr.Message", err.Error())
 		}
 	})
+}
+
+func TestStepContext_IsBecknV2(t *testing.T) {
+	tests := []struct {
+		name    string
+		version string
+		ondc    bool
+		want    bool
+	}{
+		{"v2 non-ONDC", "2.0.0", false, true},
+		{"ONDC TRV10 is 2.0.0 but keeps the Beckn 1.x format", "2.0.0", true, false},
+		{"ONDC Retail 1.2.5", "1.2.5", true, false},
+		{"pre-v2 non-ONDC", "1.1.0", false, false},
+		{"empty version", "", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), ContextKeyONDC, tt.ondc)
+			sc := &StepContext{Context: ctx, ProtocolVersion: tt.version}
+			if got := sc.IsBecknV2(); got != tt.want {
+				t.Errorf("IsBecknV2() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

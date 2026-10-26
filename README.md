@@ -34,3 +34,17 @@ The ONDC Registry and Gateway are not available to us, so they are stubbed, alon
 the schemas and the seller's backend. See [docs/ondc-preprocessing.md](docs/ondc-preprocessing.md)
 for the full list of checks, what comes from ONIX, what is new, and what to confirm
 before going live.
+
+## ONDC end-to-end tests
+
+`beckn-onix/test/e2e/ondc` sends realistic ONDC messages through real ONIX processes, for **all 20 Beckn
+endpoints** (`search` … `support` and their `on_*` callbacks) in two ONDC domains: **TRV10** (mobility) and
+**RET14** (retail). Run them with:
+
+```bash
+cd beckn-onix
+go test ./test/e2e/ondc/... -count=1 -timeout 15m -v
+```
+
+The first run builds the server and plugins (2–4 minutes); later runs take about 20 seconds. See
+`beckn-onix/test/e2e/ondc/README.md` for what is tested, the fixtures and the changes this needed in ONIX.

@@ -1,0 +1,190 @@
+{
+  "context": {
+    "domain": "ONDC:RET14",
+    "country": "IND",
+    "city": "std:080",
+    "action": "on_init",
+    "core_version": "1.2.5",
+    "bap_id": "bap.retail.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "bpp_id": "bpp.retail.example.com",
+    "bpp_uri": "{{BPP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "order": {
+      "provider": {
+        "id": "bpp.retail.example.com",
+        "locations": [
+          {
+            "id": "L-BLR-01"
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "I-PULSE-PRO-BLACK",
+          "fulfillment_id": "L-BLR-01_1",
+          "quantity": {
+            "count": 1
+          }
+        }
+      ],
+      "quote": {
+        "price": {
+          "currency": "INR",
+          "value": "1599.00"
+        },
+        "breakup": [
+          {
+            "title": "Kaveri Pulse Pro Jet Black",
+            "price": {
+              "currency": "INR",
+              "value": "1599.00"
+            },
+            "@ondc/org/item_id": "I-PULSE-PRO-BLACK",
+            "item": {
+              "price": {
+                "currency": "INR",
+                "value": "1599.00"
+              }
+            },
+            "@ondc/org/item_quantity": {
+              "count": 1
+            },
+            "@ondc/org/title_type": "item"
+          },
+          {
+            "title": "Delivery Charges",
+            "price": {
+              "currency": "INR",
+              "value": "0.00"
+            },
+            "@ondc/org/item_id": "L-BLR-01_1",
+            "@ondc/org/title_type": "delivery"
+          }
+        ],
+        "ttl": "PT15M"
+      },
+      "billing": {
+        "name": "Asha Rao",
+        "address": {
+          "name": "Asha Rao",
+          "building": "No. 14",
+          "locality": "5th Cross, Koramangala",
+          "city": "Bengaluru",
+          "state": "Karnataka",
+          "country": "India",
+          "area_code": "560034"
+        },
+        "email": "asha.rao@example.com",
+        "phone": "9876543210",
+        "created_at": "2025-07-10T08:44:14.792Z",
+        "updated_at": "2025-07-10T08:44:14.792Z",
+        "tax_number": "00ABCDE1234F1Z5"
+      },
+      "fulfillments": [
+        {
+          "id": "L-BLR-01_1",
+          "type": "Delivery",
+          "provider_id": "L-BLR-01",
+          "tracking": true,
+          "end": {
+            "location": {
+              "gps": "12.9352,77.6245",
+              "address": {
+                "name": "Asha Rao",
+                "building": "No. 14",
+                "locality": "5th Cross, Koramangala",
+                "city": "Bengaluru",
+                "state": "Karnataka",
+                "country": "India",
+                "area_code": "560034"
+              }
+            },
+            "contact": {
+              "phone": "9876543210"
+            }
+          }
+        }
+      ],
+      "payment": {
+        "@ondc/org/buyer_app_finder_fee_type": "percent",
+        "@ondc/org/buyer_app_finder_fee_amount": "3",
+        "@ondc/org/settlement_details": [
+          {
+            "settlement_counterparty": "seller-app",
+            "settlement_phase": "sale-amount",
+            "settlement_type": "neft",
+            "settlement_bank_account_no": "1112220032274181",
+            "settlement_ifsc_code": "RAZR0000001",
+            "beneficiary_name": "Kishor",
+            "bank_name": "satebankofindia",
+            "branch_name": "manikonda"
+          }
+        ]
+      },
+      "tags": [
+        {
+          "code": "bpp_terms",
+          "list": [
+            {
+              "code": "np_type",
+              "value": "ISN"
+            },
+            {
+              "code": "tax_number",
+              "value": "22AAAAA0000A1Z5"
+            },
+            {
+              "code": "provider_tax_number",
+              "value": "AAAAA0000A"
+            }
+          ]
+        }
+      ],
+      "cancellation_terms": [
+        {
+          "fulfillment_state": {
+            "descriptor": {
+              "code": "Pending",
+              "short_desc": "051"
+            }
+          },
+          "cancellation_fee": {
+            "percentage": "0.00"
+          }
+        },
+        {
+          "fulfillment_state": {
+            "descriptor": {
+              "code": "Packed",
+              "short_desc": "004"
+            }
+          },
+          "cancellation_fee": {
+            "percentage": "10.00"
+          }
+        },
+        {
+          "fulfillment_state": {
+            "descriptor": {
+              "code": "Packed",
+              "short_desc": "005"
+            }
+          },
+          "cancellation_fee": {
+            "percentage": "12.00",
+            "amount": {
+              "currency": "INR",
+              "value": "8.00"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
