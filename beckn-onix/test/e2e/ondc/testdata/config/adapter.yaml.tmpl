@@ -75,6 +75,8 @@ modules:
             config:
               contextKeys: transaction_id,message_id
               role: {{ .Role }}
+              # Answer every refusal in the ONDC shape, even for a body that cannot be read at all.
+              ondc: "true"
       steps:
         - validateSign
         - validateSchema
@@ -128,6 +130,8 @@ modules:
             config:
               contextKeys: transaction_id,message_id
               role: {{ .Role }}
+              # Answer every refusal in the ONDC shape, even for a body that cannot be read at all.
+              ondc: "true"
       steps:
         - validateSchema
         - addRoute

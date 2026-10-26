@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -306,45 +307,24 @@ func TestWrapExtractContextErr(t *testing.T) {
 	})
 }
 
-func TestIsONDCDomain(t *testing.T) {
-	tests := []struct {
-		domain string
-		want   bool
-	}{
-		{"ONDC:RET10", true},
-		{"ONDC:TRV10", true},
-		{"ondc:ret14", true},
-		{"ONDC:", true},
-		{"ONDC", false},
-		{"nic2004:60221", false},
-		{"retail:1.1.0", false},
-		{"", false},
-	}
-	for _, tt := range tests {
-		if got := IsONDCDomain(tt.domain); got != tt.want {
-			t.Errorf("IsONDCDomain(%q) = %v, want %v", tt.domain, got, tt.want)
-		}
-	}
-}
-
 func TestStepContext_IsBecknV2(t *testing.T) {
 	tests := []struct {
 		name    string
 		version string
-		domain  string
+		ondc    bool
 		want    bool
 	}{
-		{"v2 non-ONDC", "2.0.0", "beckn.one:deg:ev-charging:2.0.0", true},
-		{"v2 without domain", "2.0.0", "", true},
-		{"ONDC TRV10 is 2.0.0 but keeps the Beckn 1.x format", "2.0.0", "ONDC:TRV10", false},
-		{"ONDC Retail 1.2.5", "1.2.5", "ONDC:RET14", false},
-		{"pre-v2 non-ONDC", "1.1.0", "retail:1.1.0", false},
-		{"empty version", "", "", false},
+		{"v2 non-ONDC", "2.0.0", false, true},
+		{"ONDC TRV10 is 2.0.0 but keeps the Beckn 1.x format", "2.0.0", true, false},
+		{"ONDC Retail 1.2.5", "1.2.5", true, false},
+		{"pre-v2 non-ONDC", "1.1.0", false, false},
+		{"empty version", "", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := &StepContext{ProtocolVersion: tt.version, Domain: tt.domain}
-			if got := ctx.IsBecknV2(); got != tt.want {
+			ctx := context.WithValue(context.Background(), ContextKeyONDC, tt.ondc)
+			sc := &StepContext{Context: ctx, ProtocolVersion: tt.version}
+			if got := sc.IsBecknV2(); got != tt.want {
 				t.Errorf("IsBecknV2() = %v, want %v", got, tt.want)
 			}
 		})

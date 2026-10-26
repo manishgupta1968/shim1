@@ -18,6 +18,12 @@ type Config struct {
 	Role        string
 	ContextKeys []string
 	ParentID    string
+	// ONDC marks every request on this module as an ONDC request, so that all
+	// refusals, including ones for a body that cannot be read at all, are written
+	// in the ONDC shape: {"message":{"ack":{"status":"NACK"}},"error":{type,code,message}}.
+	// Without it ONIX learns a request is ONDC only from context.core_version, which
+	// is not available when the body is empty or not JSON.
+	ONDC bool
 }
 
 // writeCodedError writes a Beckn v2.0.0 ErrorCode-aligned JSON error body.
@@ -27,10 +33,32 @@ type Config struct {
 // nack() produces elsewhere — wiring this plugin into that pipeline (with the
 // signing/telemetry implications that carries) is tracked separately in #868.
 func writeCodedError(ctx context.Context, w http.ResponseWriter, status int, code, message string) {
+	writeError(ctx, w, status, code, message, false)
+}
+
+// ondcNack is the ONDC error response body.
+type ondcNack struct {
+	Message struct {
+		Ack struct {
+			Status model.Status `json:"status"`
+		} `json:"ack"`
+	} `json:"message"`
+	Error *model.Error `json:"error"`
+}
+
+// writeError writes the error body: the original ONIX body, or the ONDC NACK when ondc is true.
+func writeError(ctx context.Context, w http.ResponseWriter, status int, code, message string, ondc bool) {
 	// model.NewCodedError's result is a two-string-field struct that cannot
 	// realistically fail to marshal — matching nack()'s own established
 	// convention (core/module/handler/responsestep.go) of not guarding this.
-	data, _ := json.Marshal(model.NewCodedError(code, message))
+	var data []byte
+	if ondc {
+		n := ondcNack{Error: model.ToONDCError(model.NewCodedError(code, message))}
+		n.Message.Ack.Status = model.StatusNACK
+		data, _ = json.Marshal(n)
+	} else {
+		data, _ = json.Marshal(model.NewCodedError(code, message))
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if _, werr := w.Write(data); werr != nil {
@@ -64,9 +92,13 @@ func NewPreProcessor(cfg *Config) (func(http.Handler) http.Handler, error) {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
+			if cfg.ONDC {
+				ctx = context.WithValue(ctx, model.ContextKeyONDC, true)
+				r = r.WithContext(ctx)
+			}
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
-				writeCodedError(ctx, w, http.StatusBadRequest, "SCH_INVALID_JSON", "Failed to read request body")
+				writeError(ctx, w, http.StatusBadRequest, "SCH_INVALID_JSON", "Failed to read request body", cfg.ONDC)
 				return
 			}
 
@@ -90,7 +122,7 @@ func NewPreProcessor(cfg *Config) (func(http.Handler) http.Handler, error) {
 			// classification reqmapper (#867) relies on for the identical check.
 			_, reqContext, becknErr := model.ExtractContext(body)
 			if becknErr != nil {
-				writeCodedError(ctx, w, http.StatusBadRequest, becknErr.Code, becknErr.Message)
+				writeError(ctx, w, http.StatusBadRequest, becknErr.Code, becknErr.Message, cfg.ONDC)
 				return
 			}
 

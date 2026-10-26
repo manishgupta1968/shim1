@@ -1334,26 +1334,36 @@ func TestProxy_QueryParamsForwardedToUpstream(t *testing.T) {
 	}
 }
 
-func TestExtractProtocolVersionAndDomain(t *testing.T) {
+// ONDC TRV10 sends context.version 2.0.0 (not core_version). A module configured for ONDC
+// (reqpreprocessor "ondc: true") marks every request, so TRV10 gets the ONDC format and no
+// Beckn v2 behaviour; the same version without the mark is Beckn v2.
+func TestStepCtx_ONDCMarkOverridesVersion2(t *testing.T) {
+	const body = `{"context":{"domain":"ONDC:TRV10","version":"2.0.0","action":"search"}}`
 	tests := []struct {
-		name        string
-		body        string
-		wantVersion string
-		wantDomain  string
+		name     string
+		marked   bool
+		wantONDC bool
+		wantV2   bool
 	}{
-		{"version only", `{"context":{"domain":"ONDC:TRV10","version":"2.0.0"}}`, "2.0.0", "ONDC:TRV10"},
-		{"core_version only (ONDC Retail)", `{"context":{"domain":"ONDC:RET14","core_version":"1.2.5"}}`, "1.2.5", "ONDC:RET14"},
-		{"version wins over core_version", `{"context":{"version":"2.0.0","core_version":"1.2.5"}}`, "2.0.0", ""},
-		{"neither", `{"context":{"action":"search"}}`, "", ""},
-		{"not JSON", `nope`, "", ""},
+		{"module configured for ONDC", true, true, false},
+		{"module not configured for ONDC", false, false, true},
 	}
+	h := &stdHandler{role: model.RoleBAP}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := extractProtocolVersion([]byte(tt.body)); got != tt.wantVersion {
-				t.Errorf("extractProtocolVersion() = %q, want %q", got, tt.wantVersion)
+			req := httptest.NewRequest(http.MethodPost, "/bap/caller/search", strings.NewReader(body))
+			if tt.marked {
+				req = req.WithContext(context.WithValue(req.Context(), model.ContextKeyONDC, true))
 			}
-			if got := extractDomain([]byte(tt.body)); got != tt.wantDomain {
-				t.Errorf("extractDomain() = %q, want %q", got, tt.wantDomain)
+			sc, err := h.stepCtx(req, http.Header{})
+			if err != nil {
+				t.Fatalf("stepCtx() err = %v", err)
+			}
+			if got := model.IsONDC(sc.Context); got != tt.wantONDC {
+				t.Errorf("IsONDC = %v, want %v", got, tt.wantONDC)
+			}
+			if got := sc.IsBecknV2(); got != tt.wantV2 {
+				t.Errorf("IsBecknV2 = %v, want %v", got, tt.wantV2)
 			}
 		})
 	}

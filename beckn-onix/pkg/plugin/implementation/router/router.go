@@ -244,8 +244,7 @@ func (r *Router) Route(ctx context.Context, reqURL *url.URL, body []byte) (*mode
 	// bapUri), then the new Beckn spec v2 names (receiverUri, senderUri).
 	bppURI := getContextString(reqContext, "bpp_uri", "bppUri", "receiverUri")
 	bapURI := getContextString(reqContext, "bap_uri", "bapUri", "senderUri")
-	// ONDC Retail (1.2.x) carries its protocol version in core_version rather
-	// than version, so fall back to it when version is absent.
+	// "core_version" is the ONDC / Beckn 1.x spelling of the protocol version.
 	version := getContextString(reqContext, "version", "core_version")
 
 	// For v2.x.x, ignore domain and use wildcard; for v1.x.x, use actual domain

@@ -108,10 +108,6 @@ const (
 	// ContextKeyNetworkID is the context key for the network identifier extracted from
 	// context.network_id (or context.networkId) in the inbound request body.
 	ContextKeyNetworkID ContextKey = "network_id"
-
-	// ContextKeyDomain is the context key for the Beckn domain (e.g. "ONDC:TRV10")
-	// extracted from context.domain in the inbound request body.
-	ContextKeyDomain ContextKey = "domain"
 )
 
 // ProtocolVersionV2 is the Beckn protocol version string for the v2.0.0 release.
@@ -131,13 +127,6 @@ func IsAtLeastV2(version string) bool {
 		return false
 	}
 	return major >= 2
-}
-
-// IsONDCDomain reports whether a context.domain value belongs to ONDC
-// (for example "ONDC:RET10" or "ONDC:TRV10"). The prefix match is case-insensitive.
-func IsONDCDomain(domain string) bool {
-	const prefix = "ONDC:"
-	return len(domain) >= len(prefix) && strings.EqualFold(domain[:len(prefix)], prefix)
 }
 
 var contextKeys = map[string]ContextKey{
@@ -334,18 +323,17 @@ type StepContext struct {
 	Role                 Role
 	RespHeader           http.Header
 	ProtocolVersion      string // Protocol version parsed from context.version (or ONDC Retail's context.core_version), e.g. "2.0.0"
-	Domain               string // Domain parsed from context.domain (e.g. "ONDC:TRV10"); empty when absent
 	MessageID            string // Message ID parsed from context.messageId in the request body
 	InboundAuthSignature string // Raw Base64 signature from the inbound Authorization header's signature="..." attribute
 	IsCallerHandler      bool   // True when the handler is a Caller (outbound); false for Receiver (inbound)
 }
 
 // IsBecknV2 reports whether the request follows Beckn v2 behaviour: the v2 ACK/NACK
-// envelope, ACK signing and request-signature binding. ONDC domains are excluded even
+// envelope, ACK signing and request-signature binding. ONDC requests are excluded even
 // when their version is >= 2: ONDC TRV10 uses context.version 2.0.0 on Beckn core 1.1.0
 // and so keeps the Beckn 1.x wire format.
 func (ctx *StepContext) IsBecknV2() bool {
-	return IsAtLeastV2(ctx.ProtocolVersion) && !IsONDCDomain(ctx.Domain)
+	return IsAtLeastV2(ctx.ProtocolVersion) && !IsONDC(ctx.Context)
 }
 
 // WithContext updates the existing StepContext with a new context.

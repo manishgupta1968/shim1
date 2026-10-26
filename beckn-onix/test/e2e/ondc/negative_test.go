@@ -23,9 +23,11 @@ func assertNotDelivered(t *testing.T, b *backend, txn string) {
 
 // signatureCase is one way a message can fail ONDC signature verification.
 type signatureCase struct {
-	name       string
-	wantCode   string
-	wantHeader string // a challenge header the receiver must send back (WWW-Authenticate)
+	name string
+	// wantMessage is text the NACK's error message must contain. ONIX answers every refusal to an
+	// unverifiable sender with the one ONDC code 30016, so the message tells the cases apart.
+	wantMessage string
+	wantHeader  string // a challenge header the receiver must send back (WWW-Authenticate)
 	// send posts the (valid, unsigned) body to url the way this case misbehaves.
 	send func(t *testing.T, url string, body []byte, v journeyIDs, signer participant, i *sharedInfra) response
 }
@@ -43,7 +45,7 @@ func signatureCases() []signatureCase {
 	}
 	return []signatureCase{
 		{
-			name: "the body was changed after signing", wantCode: "AUT_SIGNATURE_INVALID",
+			name: "the body was changed after signing", wantMessage: "signature verification failed",
 			send: func(t *testing.T, url string, body []byte, v journeyIDs, signer participant, _ *sharedInfra) response {
 				header := signBody(signer, body, time.Now(), time.Now().Add(5*time.Minute))
 				tampered := bytes.Replace(body, []byte(v.Timestamp), []byte("2020-01-01T00:00:00.000Z"), 1)
@@ -51,13 +53,13 @@ func signatureCases() []signatureCase {
 			},
 		},
 		{
-			name: "no Authorization header", wantCode: "AUT_SIGNATURE_MISSING", wantHeader: model.UnaAuthorizedHeaderSubscriber,
+			name: "no Authorization header", wantMessage: "missing", wantHeader: model.UnaAuthorizedHeaderSubscriber,
 			send: func(t *testing.T, url string, body []byte, _ journeyIDs, _ participant, _ *sharedInfra) response {
 				return post(t, url, body, nil)
 			},
 		},
 		{
-			name: "signed with the wrong private key", wantCode: "AUT_SIGNATURE_INVALID",
+			name: "signed with the wrong private key", wantMessage: "signature verification failed",
 			send: func(t *testing.T, url string, body []byte, _ journeyIDs, signer participant, _ *sharedInfra) response {
 				_, other, _ := ed25519.GenerateKey(rand.Reader)
 				forged := signer
@@ -66,31 +68,31 @@ func signatureCases() []signatureCase {
 			},
 		},
 		{
-			name: "subscriber is not in the registry", wantCode: "AUT_SUBSCRIBER_NOT_FOUND",
+			name: "subscriber is not in the registry", wantMessage: "subscriber",
 			send: func(t *testing.T, url string, body []byte, _ journeyIDs, _ participant, _ *sharedInfra) response {
 				return postSigned(t, url, body, newParticipant("ghost.example.com"))
 			},
 		},
 		{
-			name: "signer is a different participant than the one named in the message", wantCode: "AUT_UNAUTHORIZED_ACTION",
+			name: "signer is a different participant than the one named in the message", wantMessage: "identity",
 			send: signedBy(func(i *sharedInfra) participant { return i.rogue }),
 		},
 		{
-			name: "the signer's key has expired", wantCode: "AUT_KEY_EXPIRED_OR_REVOKED",
+			name: "the signer's key has expired", wantMessage: "expired",
 			send: signedBy(func(i *sharedInfra) participant { return i.expired }),
 		},
 		{
-			name: "the signer is unsubscribed", wantCode: "AUT_KEY_EXPIRED_OR_REVOKED",
+			name: "the signer is unsubscribed", wantMessage: "expired",
 			send: signedBy(func(i *sharedInfra) participant { return i.unsubscribed }),
 		},
 		{
-			name: "the signature has expired", wantCode: "AUT_SIGNATURE_INVALID",
+			name: "the signature has expired", wantMessage: "expired",
 			send: func(t *testing.T, url string, body []byte, v journeyIDs, signer participant, i *sharedInfra) response {
 				return signedAt(time.Now().Add(-10*time.Minute), time.Now().Add(-5*time.Minute))(t, url, body, v, signer, i)
 			},
 		},
 		{
-			name: "the signature is dated in the future", wantCode: "AUT_SIGNATURE_INVALID",
+			name: "the signature is dated in the future", wantMessage: "not yet valid",
 			send: func(t *testing.T, url string, body []byte, v journeyIDs, signer participant, i *sharedInfra) response {
 				return signedAt(time.Now().Add(10*time.Minute), time.Now().Add(15*time.Minute))(t, url, body, v, signer, i)
 			},
@@ -122,7 +124,10 @@ func TestNegativeSignatures(t *testing.T) {
 						v := w.newIDs()
 						body := w.fixture(t, d.action, v)
 						resp := c.send(t, d.url, body, v, d.signer, w.infra)
-						requireNACK(t, resp, http.StatusUnauthorized, "CONTEXT-ERROR", c.wantCode)
+						e := requireNACK(t, resp, http.StatusUnauthorized, errTypeCore, errCodeAuth)
+						if !strings.Contains(strings.ToLower(e.Message), c.wantMessage) {
+							t.Errorf("error message %q should mention %q", e.Message, c.wantMessage)
+						}
 						if c.wantHeader != "" && resp.Header.Get(c.wantHeader) == "" {
 							t.Errorf("want a %s challenge header, got none", c.wantHeader)
 						}
@@ -141,7 +146,7 @@ func TestNegativeSignatures(t *testing.T) {
 				model.AuthHeaderSubscriber: signBody(w.bap, body, now, now.Add(5*time.Minute)),
 				model.AuthHeaderGateway:    signBody(w.bg, other, now, now.Add(5*time.Minute)), // gateway signed a different message
 			})
-			requireNACK(t, resp, http.StatusUnauthorized, "CONTEXT-ERROR", "AUT_SIGNATURE_INVALID")
+			requireNACK(t, resp, http.StatusUnauthorized, errTypeCore, errCodeAuth)
 			if resp.Header.Get(model.UnaAuthorizedHeaderGateway) == "" {
 				t.Errorf("want a %s challenge header, got none", model.UnaAuthorizedHeaderGateway)
 			}
@@ -267,13 +272,13 @@ func TestNegativeSchemas(t *testing.T) {
 				}
 
 				resp := post(t, callerURL+c.action, body, nil)
-				e := requireNACK(t, resp, http.StatusBadRequest, "JSON-SCHEMA-ERROR", "SCH_INVALID_FORMAT")
+				e := requireNACK(t, resp, http.StatusBadRequest, errTypeSchema, errCodeSchema)
 				if c.wantMessage != "" && !strings.Contains(e.Message, c.wantMessage) {
 					t.Errorf("error message %q does not mention %q", e.Message, c.wantMessage)
 				}
 				if c.receiver {
 					resp = postSigned(t, receiverURL+c.action, body, signer)
-					requireNACK(t, resp, http.StatusBadRequest, "JSON-SCHEMA-ERROR", "SCH_INVALID_FORMAT")
+					requireNACK(t, resp, http.StatusBadRequest, errTypeSchema, errCodeSchema)
 				}
 				assertNotDelivered(t, backend, v.Txn)
 			})
@@ -288,7 +293,7 @@ func TestNegativeRouting(t *testing.T) {
 			v := w.newIDs()
 			body := mutate(t, w.fixture(t, "select", v), func(d map[string]any) { setAt(d, "ONDC:XYZ99", "context", "domain") })
 			resp := post(t, w.bapURL+"/bap/caller/select", body, nil)
-			e := requireNACK(t, resp, http.StatusBadRequest, "JSON-SCHEMA-ERROR", "SCH_INVALID_FORMAT")
+			e := requireNACK(t, resp, http.StatusBadRequest, errTypeSchema, errCodeSchema)
 			if !strings.Contains(e.Message, "schema not found") {
 				t.Errorf("error message %q should say the schema was not found", e.Message)
 			}
@@ -298,26 +303,22 @@ func TestNegativeRouting(t *testing.T) {
 			v := w.newIDs()
 			body := mutate(t, w.fixture(t, "select", v), func(d map[string]any) { setAt(d, "9.9.9", "context", w.spec.versionKey) })
 			resp := post(t, w.bapURL+"/bap/caller/select", body, nil)
-			requireNACK(t, resp, http.StatusBadRequest, "JSON-SCHEMA-ERROR", "SCH_INVALID_FORMAT")
+			requireNACK(t, resp, http.StatusBadRequest, errTypeSchema, errCodeSchema)
 			assertNotDelivered(t, w.bppBackend, v.Txn)
 		})
 		t.Run("unknown endpoint", func(t *testing.T) {
 			v := w.newIDs()
 			resp := post(t, w.bapURL+"/bap/caller/refund", w.fixture(t, "select", v), nil)
-			requireNACK(t, resp, http.StatusBadRequest, "JSON-SCHEMA-ERROR", "SCH_INVALID_FORMAT")
+			requireNACK(t, resp, http.StatusBadRequest, errTypeSchema, errCodeSchema)
 			assertNotDelivered(t, w.bppBackend, v.Txn)
 		})
 		t.Run("empty body", func(t *testing.T) {
 			resp := post(t, w.bapURL+"/bap/caller/select", nil, nil)
-			if resp.Status != http.StatusBadRequest {
-				t.Errorf("empty body: HTTP %d %s, want 400", resp.Status, resp.Body)
-			}
+			requireNACK(t, resp, http.StatusBadRequest, errTypeSchema, errCodeSchema)
 		})
 		t.Run("body that is not JSON", func(t *testing.T) {
 			resp := post(t, w.bapURL+"/bap/caller/select", []byte("not json"), nil)
-			if resp.Status != http.StatusBadRequest || !strings.Contains(string(resp.Body), "SCH_INVALID_JSON") {
-				t.Errorf("not JSON: HTTP %d %s, want 400 with SCH_INVALID_JSON", resp.Status, resp.Body)
-			}
+			requireNACK(t, resp, http.StatusBadRequest, errTypeSchema, errCodeSchema)
 		})
 	})
 }

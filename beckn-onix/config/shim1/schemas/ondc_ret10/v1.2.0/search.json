@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Shim 1 stub schema for ONDC retail 1.2.0 /search",
+  "description": "Minimal hand-written schema. Replace with the schema generated from the ONDC retail API contract.",
+  "type": "object",
+  "required": [
+    "context",
+    "message"
+  ],
+  "properties": {
+    "context": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string"
+        },
+        "city": {
+          "type": "string"
+        },
+        "action": {
+          "const": "search"
+        },
+        "core_version": {
+          "type": "string"
+        },
+        "bap_id": {
+          "type": "string"
+        },
+        "bap_uri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "bpp_id": {
+          "type": "string"
+        },
+        "bpp_uri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "transaction_id": {
+          "type": "string"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ttl": {
+          "type": "string",
+          "pattern": "^P(\\d+D)?(T(\\d+H)?(\\d+M)?(\\d+(\\.\\d+)?S)?)?$"
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "intent"
+      ]
+    }
+  }
+}

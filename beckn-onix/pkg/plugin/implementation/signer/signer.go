@@ -1,6 +1,7 @@
 package signer
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -48,12 +49,24 @@ func generateSignature(signingString []byte, privateKeyBase64 string) ([]byte, e
 		return nil, fmt.Errorf("error decoding private key: %w", err)
 	}
 
-	if len(privateKeyBytes) != ed25519.SeedSize {
+	var seed []byte
+	switch len(privateKeyBytes) {
+	case ed25519.SeedSize:
+		seed = privateKeyBytes
+	case ed25519.PrivateKeySize:
+		// ONDC's sample code stores the key as base64 of the 64-byte ed25519 key
+		// (seed followed by the public key). Use the seed, and make sure the
+		// public half really belongs to it so a damaged key is not used silently.
+		seed = privateKeyBytes[:ed25519.SeedSize]
+		if !bytes.Equal(ed25519.NewKeyFromSeed(seed)[ed25519.SeedSize:], privateKeyBytes[ed25519.SeedSize:]) {
+			return nil, errors.New("private key does not match: its public half is not derived from its seed")
+		}
+	default:
 		return nil, errors.New("invalid seed length")
 	}
 
 	// Generate the private key from the seed
-	privateKey := ed25519.NewKeyFromSeed(privateKeyBytes)
+	privateKey := ed25519.NewKeyFromSeed(seed)
 	return ed25519.Sign(privateKey, signingString), nil
 }
 

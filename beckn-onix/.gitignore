@@ -162,5 +162,8 @@ test_request.json
 
 # catalogPublish handler's local output root (config/local-beckn-one-bap.yaml)
 /catalog/
+# Shim 1 demo: keys, registry and config are generated on every run
+/config/shim1/generated/
+/shim1demo
 # Python bytecode (test/e2e/ondc/tools)
 __pycache__/

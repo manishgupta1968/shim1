@@ -281,6 +281,14 @@ func ackStatus(body []byte) string {
 	return m.Message.Ack.Status
 }
 
+// ONDC error classes and codes ONIX uses (see pkg/model/ondc.go).
+const (
+	errTypeSchema = "JSON-SCHEMA-ERROR"
+	errTypeCore   = "CORE-ERROR"
+	errCodeSchema = "30000" // the message is not valid
+	errCodeAuth   = "30016" // signature or sender could not be verified
+)
+
 // ondcError is the top-level error object of an ONDC NACK.
 type ondcErrorBody struct {
 	Type    string `json:"type"`

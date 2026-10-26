@@ -1,0 +1,20 @@
+# Where Shim 1 sends a request after it passed all checks: the seller's
+# business logic. In the demo this is a stub backend on port 9001.
+# ONIX appends the action to the URL, e.g. http://localhost:9001/ondc/search
+routingRules:
+  - domain: "ONDC:RET10"
+    version: "1.2.0"
+    targetType: "url"
+    target:
+      url: "http://localhost:9001/ondc"
+    endpoints:
+      - search
+      - select
+      - init
+      - confirm
+      - status
+      - track
+      - cancel
+      - update
+      - rating
+      - support

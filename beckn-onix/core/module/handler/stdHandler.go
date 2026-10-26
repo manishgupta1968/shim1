@@ -268,8 +268,7 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 	r.Body.Close()
 	body := bodyBuffer.Bytes()
 	subID := h.subID(r.Context())
-	protocolVersion := extractProtocolVersion(body)
-	domain := extractDomain(body)
+	protocolVersion, isONDC := extractProtocolVersion(body)
 	messageID := extractMessageID(body)
 	action := extractBecknAction(body)
 	direction := deriveDirection(h.role, action)
@@ -280,8 +279,10 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 	// functions that only receive a context.Context (e.g. sendNack,
 	// sendAck) can read them without needing StepContext.
 	ctx := context.WithValue(r.Context(), model.ContextKeyProtocolVersion, protocolVersion)
-	ctx = context.WithValue(ctx, model.ContextKeyDomain, domain)
 	ctx = context.WithValue(ctx, model.ContextKeyMsgID, messageID)
+	// ONDC requests (context.core_version) get the ONDC-style NACK body.
+	// A module configured for ONDC (reqpreprocessor "ondc") has already marked the request.
+	ctx = context.WithValue(ctx, model.ContextKeyONDC, isONDC || model.IsONDC(r.Context()))
 	return &model.StepContext{
 		Context:              ctx,
 		Request:              r,
@@ -290,7 +291,6 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 		SubID:                subID,
 		RespHeader:           rh,
 		ProtocolVersion:      protocolVersion,
-		Domain:               domain,
 		MessageID:            messageID,
 		InboundAuthSignature: inboundAuthSignature,
 		IsCallerHandler:      direction == DirectionCaller,

@@ -14,6 +14,27 @@ Requirements: Go (the version named in `beckn-onix/go.mod`), `unzip`, and Redis
 
 The build output (`server`, `plugins/`, `schemas/`) is ignored by Git.
 
+## Shim 1: ONDC request pre-processing
+
+Shim 1 is ONIX set up as an ONDC seller app. When a request such as `/search` arrives,
+Shim 1 checks the signatures, the sender's role in the Registry, the mandatory fields,
+the schema, the age of the request and repeats. Only then does it hand the request to
+the seller's business logic.
+
+Run the demo (the first run builds everything and takes a few minutes):
+
+```bash
+./run-shim1-demo.sh               # or add --skip-build after the first run
+```
+
+It sends good and bad requests, and prints PASS or FAIL for each. To test it yourself,
+step by step, read [docs/how-to-test-shim1.md](docs/how-to-test-shim1.md).
+
+The ONDC Registry and Gateway are not available to us, so they are stubbed, along with
+the schemas and the seller's backend. See [docs/ondc-preprocessing.md](docs/ondc-preprocessing.md)
+for the full list of checks, what comes from ONIX, what is new, and what to confirm
+before going live.
+
 ## ONDC end-to-end tests
 
 `beckn-onix/test/e2e/ondc` sends realistic ONDC messages through real ONIX processes, for **all 20 Beckn

@@ -50,14 +50,14 @@ app. Keys are generated for every run; nothing secret is committed.
 | `TestJourney` | one whole order in one transaction; every callback has the request's `transaction_id` and `message_id`; unsolicited `on_status` / `on_update` work too. |
 | `TestNegativeSignatures` | tampered body, missing header, wrong key, unknown / unauthorised / expired / unsubscribed signer, expired or future signature, bad gateway signature → HTTP 401 and an ONDC NACK; nothing reaches the app. |
 | `TestNegativeSchemas` | 25 messages that break an ONDC rule (wrong enum, missing field, extra context key …) → HTTP 400 and an ONDC NACK, at the caller and (for some) at the receiver. |
-| `TestNegativeRouting` | unknown domain, version or endpoint, empty body, body that is not JSON. |
+| `TestNegativeRouting` | unknown domain, version or endpoint, empty body, body that is not JSON (all answered with an ONDC NACK). |
 | `TestFixturesAreONDCValid` | every fixture passes the ONDC schemas ONIX ships, the context is right, one order id and provider id run through the journey, and every quote adds up. Needs no ONIX. |
 | `TestSchemasRejectBrokenFixtures` | a broken fixture really fails that validation (so the check is not vacuous). |
 | `TestEveryEndpointIsCovered` | fixtures, routing and schemas all list the same 20 endpoints. Add an endpoint to one and this fails until you add it to the others. |
 
 ONDC answers are checked as ONDC defines them: a request is acknowledged by the receiving app with
 `{"message":{"ack":{"status":"ACK"}}}`; a refusal by ONIX is
-`{"message":{"ack":{"status":"NACK"}},"error":{"type":…,"code":…,"message":…}}`.
+`{"message":{"ack":{"status":"NACK"}},"error":{"type":…,"code":…,"message":…}}` with ONDC's numeric code.
 
 ## Fixtures
 
@@ -92,23 +92,35 @@ The tests use the schemas ONIX ships. They were changed as follows (rebuild with
   actions, 16 pass; `search` (the 1.2.5 `bap_features` tag) and `on_status` (older rules) are rejected because the
   validator's schemas lag behind its own 1.2.5 logs, so the fixtures avoid those two constructs.
 
-## What ONIX does differently for ONDC
+## What ONIX does for ONDC
 
-The tests exposed these gaps, which this change fixes in ONIX:
+ONDC support in ONIX comes from two pieces of work that are merged here.
 
-* ONDC Retail sends its protocol version as `context.core_version`; ONIX read only `context.version`, so it could
-  not route or validate Retail. It now falls back to `core_version` (router, schema validator, handler).
-* ONDC TRV10 has `context.version 2.0.0`, which ONIX took for Beckn v2 and answered in the Beckn v2 format. For
-  `ONDC:*` domains ONIX now answers in the Beckn 1.x / ONDC format and does not sign ACKs.
-* ONIX's own refusals for ONDC domains use the ONDC shape (top-level `error` with `type`, `code`, `message`).
-  `type` is `CONTEXT-ERROR` for `AUT_*`, `JSON-SCHEMA-ERROR` for `SCH_*`, `POLICY-ERROR` for `POL_*`, else
-  `CORE-ERROR`. ONIX's own codes (for example `AUT_SIGNATURE_INVALID`) are kept; ONDC's numeric codes are not mapped.
+**From Shim 1** (`docs/ondc-preprocessing.md`):
+
+* ONDC Retail sends its protocol version as `context.core_version`; ONIX reads it (router, schema validator, handler)
+  and treats such a request as ONDC.
+* For ONDC requests ONIX answers in the Beckn 1.x / ONDC format: `{"message":{"ack":{"status":"ACK"}}}` and, for a
+  refusal, `{"message":{"ack":{"status":"NACK"}},"error":{"type":…,"code":…,"message":…}}` with ONDC's numeric codes
+  (`30016` when a sender cannot be verified, `30000` for an invalid message, `31001` for an internal error).
+* A module can mark all its traffic as ONDC with `ondc: "true"` on its `reqpreprocessor`, so even a body that is empty
+  or not JSON is refused in the ONDC shape.
+
+**Added with these tests:**
+
+* **ONDC TRV10 needs `ondc: "true"`.** TRV10 has `context.version 2.0.0` and no `core_version`, so without the setting
+  ONIX takes it for Beckn v2 and answers in the Beckn v2 format and signs ACKs. With the setting, ONDC requests are
+  never treated as Beckn v2, whatever their version (`StepContext.IsBecknV2`). `testdata/config/adapter.yaml.tmpl`
+  shows the setting; the tests prove both domains work with it.
+* The schemas (see above).
+
+Because ONIX gives every refusal to an unverifiable sender the one code `30016`, the negative tests tell the cases
+apart by the error message (for example "expired", "not yet valid", "identity").
 
 ## Not covered
 
 * Other retail domains (RET10, RET11 …): copy `ondc_ret14` to the new domain name in `schemas/` and add the domain to
   the routing templates and `domains` in `world_test.go`.
-* Error bodies produced before ONIX has read the message (for example a body that is not JSON) are not ONDC-shaped.
 * The sample configs in `config/onix*` are stale (`routingType`, no `track`/`update`/`rating`/`support`).
   `testdata/config` is a working, complete ONDC example.
 * CI: the repository's workflows are not changed.

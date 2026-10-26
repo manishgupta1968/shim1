@@ -1079,85 +1079,69 @@ func TestInitSteps_ValidateAckSignAppendsToResponseSteps(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ONDC envelope tests
+// ONDC TRV10 tests
 //
-// ONDC TRV10 has context.version 2.0.0 but is built on Beckn core 1.1.0, and ONDC
-// Retail has context.core_version 1.2.5. Both must answer in the Beckn 1.x / ONDC
-// wire format: ACK/NACK under message.ack and a top-level error object.
+// ONDC TRV10 has context.version 2.0.0 but is built on Beckn core 1.1.0, so ONIX
+// marks it as ONDC (by its ONDC:* domain). It must answer in the Beckn 1.x / ONDC
+// format (see ondc_test.go for the Retail core_version cases) and must not sign ACKs,
+// even though its version is >= 2.
 // ---------------------------------------------------------------------------
 
-// ondcCtx returns a context for an ONDC request with the given protocol version.
-func ondcCtx(version, domain, msgID string) context.Context {
-	ctx := context.WithValue(context.Background(), model.ContextKeyProtocolVersion, version)
-	ctx = context.WithValue(ctx, model.ContextKeyDomain, domain)
+// ondcV2Ctx returns the context of an ONDC request whose version is >= 2 (TRV10).
+func ondcV2Ctx(msgID string) context.Context {
+	ctx := context.WithValue(context.Background(), model.ContextKeyProtocolVersion, "2.0.0")
+	ctx = context.WithValue(ctx, model.ContextKeyONDC, true)
 	return context.WithValue(ctx, model.ContextKeyMsgID, msgID)
 }
 
-func TestSendAck_ONDC(t *testing.T) {
-	tests := []struct {
-		name string
-		ctx  context.Context
-	}{
-		{"TRV10 version 2.0.0", ondcCtx("2.0.0", "ONDC:TRV10", "m-1")},
-		{"Retail core_version 1.2.5", ondcCtx("1.2.5", "ONDC:RET14", "m-2")},
+func TestSendAck_ONDCVersion2(t *testing.T) {
+	w := httptest.NewRecorder()
+	body := sendAck(ondcV2Ctx("m-1"), w)
+	const want = `{"message":{"ack":{"status":"ACK"}}}`
+	if string(body) != want || w.Body.String() != want {
+		t.Errorf("sendAck() body = %s (wire %s), want %s", body, w.Body.String(), want)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			body := sendAck(tt.ctx, w)
-			const want = `{"message":{"ack":{"status":"ACK"}}}`
-			if string(body) != want || w.Body.String() != want {
-				t.Errorf("sendAck() body = %s (wire %s), want %s", body, w.Body.String(), want)
-			}
-			if w.Code != http.StatusOK {
-				t.Errorf("sendAck() status = %d, want 200", w.Code)
-			}
-		})
+	if w.Code != http.StatusOK {
+		t.Errorf("sendAck() status = %d, want 200", w.Code)
 	}
 }
 
-func TestSendNack_ONDC(t *testing.T) {
+func TestSendNack_ONDCVersion2(t *testing.T) {
 	tests := []struct {
 		name       string
-		ctx        context.Context
 		err        error
 		wantStatus int
 		wantType   string
 		wantCode   string
-		wantPath   string
 	}{
 		{
-			name:       "signature failure on TRV10 is a context error",
-			ctx:        ondcCtx("2.0.0", "ONDC:TRV10", "m-1"),
+			name:       "signature failure",
 			err:        model.NewSignValidationErr("AUT_SIGNATURE_INVALID", errors.New("bad signature")),
 			wantStatus: http.StatusUnauthorized,
-			wantType:   "CONTEXT-ERROR",
-			wantCode:   "AUT_SIGNATURE_INVALID",
+			wantType:   model.ONDCTypeCore,
+			wantCode:   model.ONDCCodeInvalidSignature,
 		},
 		{
-			name: "schema failure on Retail is a json-schema error with a path",
-			ctx:  ondcCtx("1.2.5", "ONDC:RET14", "m-2"),
+			name: "schema failure",
 			err: &model.SchemaValidationErr{Errors: []model.Error{
 				{Message: "missing property 'ttl'", Details: &model.ErrorDetails{Path: "context"}},
 			}},
 			wantStatus: http.StatusBadRequest,
-			wantType:   "JSON-SCHEMA-ERROR",
-			wantCode:   "SCH_INVALID_FORMAT",
-			wantPath:   "context",
+			wantType:   model.ONDCTypeSchema,
+			wantCode:   model.ONDCCodeInvalidRequest,
 		},
 		{
-			name:       "anything else is a core error",
-			ctx:        ondcCtx("2.0.0", "ONDC:TRV10", "m-3"),
+			name:       "anything else",
 			err:        errors.New("boom"),
 			wantStatus: http.StatusInternalServerError,
-			wantType:   "CORE-ERROR",
-			wantCode:   "NET_INTERNAL_ERROR",
+			wantType:   model.ONDCTypeCore,
+			wantCode:   model.ONDCCodeInternalError,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			sendNack(tt.ctx, w, tt.err)
+			sendNack(ondcV2Ctx("m-2"), w, tt.err)
 			if w.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
 			}
@@ -1166,60 +1150,52 @@ func TestSendNack_ONDC(t *testing.T) {
 					Ack struct {
 						Status string `json:"status"`
 					} `json:"ack"`
-					Error json.RawMessage `json:"error"`
+					Status string          `json:"status"`
+					Error  json.RawMessage `json:"error"`
 				} `json:"message"`
 				Error struct {
 					Type    string `json:"type"`
 					Code    string `json:"code"`
-					Path    string `json:"path"`
 					Message string `json:"message"`
 				} `json:"error"`
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 				t.Fatalf("body %q is not JSON: %v", w.Body.String(), err)
 			}
-			if got.Message.Ack.Status != "NACK" {
-				t.Errorf("message.ack.status = %q, want NACK (body %s)", got.Message.Ack.Status, w.Body.String())
+			if got.Message.Ack.Status != "NACK" || got.Message.Status != "" {
+				t.Errorf("want the Beckn 1.x envelope with message.ack.status NACK, got %s", w.Body.String())
 			}
 			if len(got.Message.Error) != 0 {
 				t.Errorf("error must be top level, not inside message (body %s)", w.Body.String())
 			}
-			if got.Error.Type != tt.wantType || got.Error.Code != tt.wantCode || got.Error.Path != tt.wantPath || got.Error.Message == "" {
-				t.Errorf("error = %+v, want type %q code %q path %q and a message", got.Error, tt.wantType, tt.wantCode, tt.wantPath)
+			if got.Error.Type != tt.wantType || got.Error.Code != tt.wantCode || got.Error.Message == "" {
+				t.Errorf("error = %+v, want type %q code %q and a message", got.Error, tt.wantType, tt.wantCode)
 			}
 		})
 	}
 }
 
-// Non-ONDC requests must keep their existing envelopes.
-func TestSendNack_NonONDC_Unchanged(t *testing.T) {
-	err := model.NewSignValidationErr("AUT_SIGNATURE_INVALID", errors.New("bad signature"))
-
+// Beckn v2 outside ONDC keeps the v2 envelope.
+func TestSendNack_Version2OutsideONDC_Unchanged(t *testing.T) {
 	w := httptest.NewRecorder()
-	sendNack(v2Ctx("m-1"), w, err)
-	if !strings.Contains(w.Body.String(), `"message":{"status":"NACK","messageId":"m-1"`) {
+	sendNack(v2Ctx("m-3"), w, model.NewSignValidationErr("AUT_SIGNATURE_INVALID", errors.New("bad signature")))
+	if !strings.Contains(w.Body.String(), `"message":{"status":"NACK","messageId":"m-3"`) {
 		t.Errorf("v2 NACK = %s, want the v2 envelope", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	sendNack(context.Background(), w, err)
-	if !strings.Contains(w.Body.String(), `"message":{"ack":{"status":"NACK"},"error":{`) {
-		t.Errorf("pre-v2 NACK = %s, want the error inside message", w.Body.String())
 	}
 }
 
 // ONDC has no ACK signing, even when the version is 2.0.0 and signAck is configured.
-func TestAckSignerStep_ONDC_Skips(t *testing.T) {
+func TestAckSignerStep_ONDCVersion2_Skips(t *testing.T) {
 	signer := &mockSigner{}
 	km := &mockKM{keyset: &model.Keyset{}}
 	step, _ := newAckSignerStep(signer, km)
 
 	ctx := makeStepCtx("2.0.0", "msg-ondc", "bpp.example.com", "")
-	ctx.Domain = "ONDC:TRV10"
+	ctx.Context = context.WithValue(ctx.Context, model.ContextKeyONDC, true)
 	if err := step.RunOnResponse(ctx, nil); err != nil {
 		t.Fatalf("RunOnResponse() unexpected error: %v", err)
 	}
 	if signer.signAckCalled || ctx.RespHeader.Get("Signature") != "" {
-		t.Error("expected no ACK signing for an ONDC domain")
+		t.Error("expected no ACK signing for an ONDC request")
 	}
 }

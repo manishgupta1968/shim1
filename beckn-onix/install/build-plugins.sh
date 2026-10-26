@@ -29,6 +29,8 @@ plugins=(
     "localcatalogblobstore"
     "publisher"
     "registry"
+    "ondcregistry"
+    "ondcguard"
     "dediregistry"
     "manifestloader"
     "reqpreprocessor"

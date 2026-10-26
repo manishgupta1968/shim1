@@ -18,11 +18,9 @@ import (
 // Payload represents the structure of the data payload with context information.
 type payload struct {
 	Context struct {
-		Domain  string `json:"domain"`
-		Version string `json:"version"`
-		// CoreVersion is used when Version is absent: ONDC Retail (1.2.x)
-		// carries its protocol version in core_version.
-		CoreVersion string `json:"core_version"`
+		Domain      string `json:"domain"`
+		Version     string `json:"version"`
+		CoreVersion string `json:"core_version"` // ONDC / Beckn 1.x spelling
 	} `json:"context"`
 }
 

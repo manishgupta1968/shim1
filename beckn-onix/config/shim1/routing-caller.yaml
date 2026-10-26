@@ -1,0 +1,19 @@
+# Where Shim 1 sends the seller's callbacks (on_search, on_select, ...):
+# to the buyer app, at the bap_uri found in the message context.
+routingRules:
+  - domain: "ONDC:RET10"
+    version: "1.2.0"
+    targetType: "bap"
+    target:
+      url: "http://localhost:9002/bap"
+    endpoints:
+      - on_search
+      - on_select
+      - on_init
+      - on_confirm
+      - on_status
+      - on_track
+      - on_cancel
+      - on_update
+      - on_rating
+      - on_support
