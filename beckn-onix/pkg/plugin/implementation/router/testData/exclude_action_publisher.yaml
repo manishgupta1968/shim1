@@ -1,0 +1,10 @@
+routingRules:
+  - domain: ONDC:TRV10
+    version: 1.1.0
+    targetType: publisher
+    target:
+      publisherId: test_topic
+      excludeAction: true
+    endpoints:
+      - search
+      - init

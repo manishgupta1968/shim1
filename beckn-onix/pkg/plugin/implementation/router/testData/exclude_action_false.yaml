@@ -1,0 +1,10 @@
+routingRules:
+  - domain: ONDC:TRV10
+    version: 1.1.0
+    targetType: url
+    target:
+      url: https://services-backend.com/v2/ondc
+      excludeAction: false
+    endpoints:
+      - search
+      - init
