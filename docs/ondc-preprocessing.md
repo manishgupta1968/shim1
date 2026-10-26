@@ -136,7 +136,12 @@ official ONDC statement.
    meaningful schema. The other actions have a very light schema.
 6. **The Gateway header rule.** We require `X-Gateway-Authorization` on `search`
    only. Please check with the ONDC network rules if other actions need it.
-7. **Three existing ONIX tests fail in our sandbox**, which runs as the root user
-   (`TestUnzipFailure`, `TestPluginsFailure`, `TestValidator_Initialise`). Each test
-   expects a "permission denied" error, and the root user is never denied. They are in
-   code we did not change. We have not run them as a normal user.
+7. **Three existing ONIX tests fail when run as the root user, and pass as a normal
+   user.** The tests are `TestUnzipFailure/file_creation_failure`,
+   `TestPluginsFailure/permission_denied` (both in `pkg/plugin/manager_test.go`) and
+   `TestValidator_Initialise/Failed_to_read_directory` (in the schemavalidator package).
+   Each one makes a folder that nobody may open, and expects "permission denied".
+   The root user can open any folder, so no error comes and the test fails.
+   We checked this by running the same compiled test files as root (3 failures) and as
+   the normal user `ubuntu` (all pass). The code under test is not code we changed.
+   If you run the whole test suite in a root-only sandbox, expect these three failures.
