@@ -1,0 +1,33 @@
+{
+  "context": {
+    "domain": "ONDC:RET10",
+    "location": {
+      "city": {
+        "code": "std:080"
+      },
+      "country": {
+        "code": "IND"
+      }
+    },
+    "action": "search",
+    "version": "2.0.1",
+    "bap_id": "buyerapp.com",
+    "bap_uri": "https://buyerapp.com/grocery",
+    "transaction_id": "T1",
+    "message_id": "M1",
+    "timestamp": "2023-01-08T22:00:00.000Z",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "intent": {
+      "item": {
+        "descriptor": {
+          "name": "oil"
+        }
+      },
+      "fulfillment": {
+        "type": "Delivery"
+      }
+    }
+  }
+}

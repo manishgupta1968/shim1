@@ -213,7 +213,7 @@ func TestNewPreProcessorErrorCases(t *testing.T) {
 			middleware, err := NewPreProcessor(tt.config)
 			if tt.expectErr {
 				if err == nil {
-					t.Errorf("Expected an error for NewPreProcessor(%s), but got none", tt.config)
+					t.Errorf("Expected an error for NewPreProcessor(%v), but got none", tt.config)
 				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("Expected error to contain %q, got %v", tt.errMsg, err)
 				}

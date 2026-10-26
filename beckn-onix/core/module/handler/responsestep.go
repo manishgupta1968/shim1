@@ -35,6 +35,13 @@ type preV2Response struct {
 	Message preV2Message `json:"message"`
 }
 
+// ondcNackResponse is the ONDC (Beckn 1.x) error response.
+// Wire format: {"message":{"ack":{"status":"NACK"}},"error":{"type":"..","code":"..","message":".."}}
+type ondcNackResponse struct {
+	Message preV2Message `json:"message"`
+	Error   *model.Error `json:"error,omitempty"`
+}
+
 // sendAck sends a synchronous ACK response to the client.
 // For context.version "2.0.0" and later the response uses the v2 envelope:
 //
@@ -113,6 +120,13 @@ func nackBodyBytes(ctx context.Context, becknErr *model.Error, bodyStatus model.
 				MessageID: msgID(ctx),
 				Error:     becknErr,
 			},
+		}
+		data, _ = json.Marshal(resp)
+	} else if model.IsONDC(ctx) {
+		// ONDC / Beckn 1.x: the error sits next to "message", not inside it.
+		resp := &ondcNackResponse{
+			Message: preV2Message{Ack: preV2Ack{Status: bodyStatus}},
+			Error:   model.ToONDCError(becknErr),
 		}
 		data, _ = json.Marshal(resp)
 	} else {

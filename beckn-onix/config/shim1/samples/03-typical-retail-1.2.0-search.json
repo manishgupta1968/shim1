@@ -1,0 +1,53 @@
+{
+  "context": {
+    "domain": "ONDC:RET10",
+    "country": "IND",
+    "city": "std:080",
+    "action": "search",
+    "core_version": "1.2.0",
+    "bap_id": "buyerapp.example",
+    "bap_uri": "https://buyerapp.example/ondc",
+    "transaction_id": "T1",
+    "message_id": "M1",
+    "timestamp": "2023-01-08T22:00:00.000Z",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "intent": {
+      "category": {
+        "id": "Foodgrains"
+      },
+      "fulfillment": {
+        "type": "Delivery"
+      },
+      "payment": {
+        "@ondc/org/buyer_app_finder_fee_type": "percent",
+        "@ondc/org/buyer_app_finder_fee_amount": "3"
+      },
+      "item": {
+        "descriptor": {
+          "name": "oil"
+        }
+      },
+      "tags": [
+        {
+          "code": "bap_terms",
+          "list": [
+            {
+              "code": "static_terms",
+              "value": ""
+            },
+            {
+              "code": "static_terms_new",
+              "value": "https://github.com/ONDC-Official/NP-Static-Terms/buyerNP_BNP/1.0/tc.pdf"
+            },
+            {
+              "code": "effective_date",
+              "value": "2023-10-01T00:00:00.000Z"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

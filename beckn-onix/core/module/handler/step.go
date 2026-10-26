@@ -410,7 +410,7 @@ func (s *validateSchemaStep) recordMetrics(ctx *model.StepContext, err error) {
 	if err != nil {
 		status = "failed"
 	}
-	version := extractProtocolVersion(ctx.Body)
+	version, _ := extractProtocolVersion(ctx.Body)
 	s.metrics.SchemaValidationsTotal.Add(ctx.Context, 1,
 		metric.WithAttributes(
 			telemetry.AttrSchemaVersion.String(version),
@@ -458,17 +458,23 @@ func (s *addRouteStep) Run(ctx *model.StepContext) error {
 	return nil
 }
 
-func extractProtocolVersion(body []byte) string {
+// extractProtocolVersion returns context.version, or context.core_version for
+// ONDC-style requests. The second result is true when core_version was used.
+func extractProtocolVersion(body []byte) (string, bool) {
 	type contextEnvelope struct {
 		Context struct {
-			Version string `json:"version"`
+			Version     string `json:"version"`
+			CoreVersion string `json:"core_version"`
 		} `json:"context"`
 	}
 	var payload contextEnvelope
-	if err := json.Unmarshal(body, &payload); err == nil {
-		return payload.Context.Version
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", false
 	}
-	return ""
+	if payload.Context.Version != "" {
+		return payload.Context.Version, false
+	}
+	return payload.Context.CoreVersion, payload.Context.CoreVersion != ""
 }
 
 // extractAuthSignature extracts the raw Base64 signature value from a Beckn
@@ -501,14 +507,18 @@ func extractAuthSignature(authHeader string) string {
 func extractMessageID(body []byte) string {
 	type contextEnvelope struct {
 		Context struct {
-			MessageID string `json:"messageId"`
+			MessageID      string `json:"messageId"`
+			MessageIDSnake string `json:"message_id"` // ONDC / Beckn 1.x spelling
 		} `json:"context"`
 	}
 	var payload contextEnvelope
-	if err := json.Unmarshal(body, &payload); err == nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	if payload.Context.MessageID != "" {
 		return payload.Context.MessageID
 	}
-	return ""
+	return payload.Context.MessageIDSnake
 }
 
 // checkPolicyStep adapts PolicyChecker into the Step interface.

@@ -8,6 +8,9 @@ import (
 
 // Error represents a standard error response.
 type Error struct {
+	// Type is the ONDC/Beckn 1.x error class (e.g. "CONTEXT-ERROR"). It is empty,
+	// and omitted from the wire, for every non-ONDC response.
+	Type    string        `json:"type,omitempty"`
 	Code    string        `json:"code"`
 	Message string        `json:"message"`
 	Details *ErrorDetails `json:"details,omitempty"`

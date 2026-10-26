@@ -1,0 +1,180 @@
+# Shim 1: ONIX configured as an ONDC seller app (BPP).
+#
+# This is a template. `shim1demo keys` fills in the placeholder values (the ones in
+# double curly braces) and writes the result to config/shim1/generated/shim1.yaml. Run the server from the
+# beckn-onix folder, because every path below is relative to it.
+appName: "shim1"
+log:
+  level: info
+  destinations:
+    - type: stdout
+  contextKeys:
+    - transaction_id
+    - message_id
+    - subscriber_id
+    - module_id
+pluginManager:
+  root: ./plugins
+  # Do not fetch protocol constants from GitHub at startup.
+  becknConstants:
+    disableRemoteRefresh: true
+http:
+  port: 8081
+  timeout:
+    read: 30
+    write: 30
+    idle: 30
+
+modules:
+  # Incoming requests from the ONDC network (buyer apps and the Gateway).
+  # Order matters: the signature is checked first because it covers the original body.
+  - name: bppTxnReceiver
+    path: /bpp/receiver/
+    handler:
+      type: std
+      role: bpp
+      subscriberId: {{.SellerID}}
+      httpClientConfig:
+        maxIdleConns: 100
+        maxIdleConnsPerHost: 20
+        idleConnTimeout: 300s
+        responseHeaderTimeout: 5s
+      plugins:
+        # STUB by default: reads config/shim1/generated/registry.json instead of the ONDC
+        # Registry. For the registry over HTTP, generate with `shim1demo keys -registry http`
+        # (mode: http, url: <registry base url>; the lookup is signed with our own key).
+        registry:
+          id: ondcregistry
+          config:
+            mode: {{.RegistryMode}}
+            file: ./config/shim1/generated/registry.json
+            url: {{.RegistryURL}}
+            callerId: {{.SellerID}}
+            callerKeyId: {{.SellerKeyID}}
+            callerPrivateKey: {{.SellerPrivate}}
+        keyManager:
+          id: simplekeymanager
+          config:
+            subscriberId: {{.SellerID}}
+            keyId: {{.SellerKeyID}}
+            signingPrivateKey: {{.SellerPrivate}}
+            signingPublicKey: {{.SellerPublic}}
+            encrPrivateKey: {{.SellerPrivate}}
+            encrPublicKey: {{.SellerPublic}}
+        signValidator:
+          id: signvalidator
+        checkPolicy:
+          id: opapolicychecker
+          config:
+            networkPolicyConfig: ./config/shim1/opa-policies.yaml
+            refreshInterval: "0"
+            ownSubscriberId: {{.SellerID}}
+            ownUri: {{.SellerURI}}
+            allowedDomains: "ONDC:RET10"
+            allowedCities: "std:080,std:011"
+            allowedCountries: "IND"
+            allowedVersions: "1.2.0"
+        # STUB: minimal hand-written schemas, see config/shim1/schemas
+        schemaValidator:
+          id: schemavalidator
+          config:
+            schemaDir: ./config/shim1/schemas
+        router:
+          id: router
+          config:
+            routingConfig: ./config/shim1/routing-receiver.yaml
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transaction_id,message_id
+              role: bpp
+              # Answer every refusal in the ONDC shape, even for a body that is not JSON.
+              ondc: "true"
+        steps:
+          - id: ondcguard
+            config:
+              registryMode: {{.RegistryMode}}
+              registryFile: ./config/shim1/generated/registry.json
+              registryUrl: {{.RegistryURL}}
+              callerId: {{.SellerID}}
+              callerKeyId: {{.SellerKeyID}}
+              callerPrivateKey: {{.SellerPrivate}}
+              gatewayActions: search
+              futureSkew: 30s
+      steps:
+        - validateSign
+        - checkPolicy
+        - validateSchema
+        - ondcguard
+        - addRoute
+
+  # Callbacks (on_search, ...) from the seller's business logic to the buyer app.
+  # Shim 1 signs them with the seller's key.
+  - name: bppTxnCaller
+    path: /bpp/caller/
+    handler:
+      type: std
+      role: bpp
+      subscriberId: {{.SellerID}}
+      httpClientConfig:
+        maxIdleConns: 100
+        maxIdleConnsPerHost: 20
+        idleConnTimeout: 300s
+        responseHeaderTimeout: 5s
+      plugins:
+        registry:
+          id: ondcregistry
+          config:
+            mode: {{.RegistryMode}}
+            file: ./config/shim1/generated/registry.json
+            url: {{.RegistryURL}}
+            callerId: {{.SellerID}}
+            callerKeyId: {{.SellerKeyID}}
+            callerPrivateKey: {{.SellerPrivate}}
+        keyManager:
+          id: simplekeymanager
+          config:
+            subscriberId: {{.SellerID}}
+            keyId: {{.SellerKeyID}}
+            signingPrivateKey: {{.SellerPrivate}}
+            signingPublicKey: {{.SellerPublic}}
+            encrPrivateKey: {{.SellerPrivate}}
+            encrPublicKey: {{.SellerPublic}}
+        signer:
+          id: signer
+        router:
+          id: router
+          config:
+            routingConfig: ./config/shim1/routing-caller.yaml
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transaction_id,message_id
+              role: bpp
+              # Answer every refusal in the ONDC shape, even for a body that is not JSON.
+              ondc: "true"
+      steps:
+        - addRoute
+        - sign
+
+  # CONTROL module, for the regression test only. It is a plain Beckn module without
+  # the ONDC setting. The test sends it a request and checks that ONIX still answers
+  # exactly as it did before our changes. Remove this module in production.
+  - name: controlReceiver
+    path: /control/receiver/
+    handler:
+      type: std
+      role: bpp
+      subscriberId: {{.SellerID}}
+      plugins:
+        schemaValidator:
+          id: schemavalidator
+          config:
+            schemaDir: ./config/shim1/schemas
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transaction_id,message_id
+              role: bpp
+      steps:
+        - validateSchema
