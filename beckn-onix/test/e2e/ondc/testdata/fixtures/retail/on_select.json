@@ -1,0 +1,94 @@
+{
+  "context": {
+    "domain": "ONDC:RET14",
+    "country": "IND",
+    "city": "std:080",
+    "action": "on_select",
+    "core_version": "1.2.5",
+    "bap_id": "bap.retail.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "bpp_id": "bpp.retail.example.com",
+    "bpp_uri": "{{BPP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "order": {
+      "provider": {
+        "id": "bpp.retail.example.com",
+        "locations": [
+          {
+            "id": "L-BLR-01"
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "I-PULSE-PRO-BLACK",
+          "fulfillment_id": "L-BLR-01_1"
+        }
+      ],
+      "quote": {
+        "price": {
+          "currency": "INR",
+          "value": "1599.00"
+        },
+        "breakup": [
+          {
+            "title": "Kaveri Pulse Pro Jet Black",
+            "price": {
+              "currency": "INR",
+              "value": "1599.00"
+            },
+            "@ondc/org/item_id": "I-PULSE-PRO-BLACK",
+            "item": {
+              "price": {
+                "currency": "INR",
+                "value": "1599.00"
+              },
+              "quantity": {
+                "available": {
+                  "count": "99"
+                },
+                "maximum": {
+                  "count": "99"
+                }
+              }
+            },
+            "@ondc/org/item_quantity": {
+              "count": 1
+            },
+            "@ondc/org/title_type": "item"
+          },
+          {
+            "title": "Delivery Charges",
+            "price": {
+              "currency": "INR",
+              "value": "0.00"
+            },
+            "@ondc/org/item_id": "L-BLR-01_1",
+            "@ondc/org/title_type": "delivery"
+          }
+        ],
+        "ttl": "PT15M"
+      },
+      "fulfillments": [
+        {
+          "id": "L-BLR-01_1",
+          "type": "Delivery",
+          "tracking": true,
+          "state": {
+            "descriptor": {
+              "code": "Serviceable"
+            }
+          },
+          "@ondc/org/category": "Standard Delivery",
+          "@ondc/org/TAT": "P7D",
+          "@ondc/org/provider_name": "kaverigadgets"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "context": {
+    "domain": "ONDC:RET14",
+    "country": "IND",
+    "city": "std:080",
+    "action": "select",
+    "core_version": "1.2.5",
+    "bap_id": "bap.retail.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "bpp_id": "bpp.retail.example.com",
+    "bpp_uri": "{{BPP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "order": {
+      "provider": {
+        "id": "bpp.retail.example.com",
+        "locations": [
+          {
+            "id": "L-BLR-01"
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "I-PULSE-PRO-BLACK",
+          "location_id": "L-BLR-01",
+          "quantity": {
+            "count": 1
+          }
+        }
+      ],
+      "fulfillments": [
+        {
+          "end": {
+            "location": {
+              "gps": "12.9352,77.6245",
+              "address": {
+                "area_code": "560034"
+              }
+            }
+          }
+        }
+      ],
+      "payment": {
+        "type": "ON-ORDER"
+      }
+    }
+  }
+}

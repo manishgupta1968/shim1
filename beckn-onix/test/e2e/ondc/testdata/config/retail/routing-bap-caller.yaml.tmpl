@@ -1,0 +1,24 @@
+# ONDC Retail RET14 (context.core_version 1.2.5). For 1.x versions the rule is keyed by domain and version.
+routingRules:
+  # search goes to the network gateway, which broadcasts it to the BPPs.
+  - domain: "ONDC:RET14"
+    version: "1.2.5"
+    targetType: url
+    target:
+      url: "{{ .GatewayURL }}/bg"
+    endpoints:
+      - search
+  # Everything else goes straight to the BPP named in context.bpp_uri.
+  - domain: "ONDC:RET14"
+    version: "1.2.5"
+    targetType: bpp
+    endpoints:
+      - select
+      - init
+      - confirm
+      - status
+      - track
+      - update
+      - cancel
+      - rating
+      - support

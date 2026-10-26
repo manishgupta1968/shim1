@@ -1,0 +1,180 @@
+{
+  "context": {
+    "domain": "ONDC:TRV10",
+    "action": "confirm",
+    "version": "2.0.0",
+    "bap_id": "bap.mobility.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S",
+    "location": {
+      "country": {
+        "code": "IND"
+      },
+      "city": {
+        "code": "std:080"
+      }
+    },
+    "bpp_id": "bpp.mobility.example.com",
+    "bpp_uri": "{{BPP_URI}}"
+  },
+  "message": {
+    "order": {
+      "provider": {
+        "id": "P1"
+      },
+      "items": [
+        {
+          "id": "I1",
+          "fulfillment_ids": [
+            "F1"
+          ]
+        }
+      ],
+      "billing": {
+        "name": "Asha Rao"
+      },
+      "fulfillments": [
+        {
+          "id": "F1",
+          "type": "DELIVERY",
+          "vehicle": {
+            "category": "AUTO_RICKSHAW"
+          },
+          "stops": [
+            {
+              "type": "START",
+              "location": {
+                "gps": "12.9715987,77.5945627"
+              }
+            },
+            {
+              "type": "END",
+              "location": {
+                "gps": "12.9352,77.6245"
+              }
+            }
+          ],
+          "customer": {
+            "person": {
+              "name": "Asha Rao"
+            },
+            "contact": {
+              "phone": "+919876543210"
+            }
+          }
+        }
+      ],
+      "quote": {
+        "price": {
+          "currency": "INR",
+          "value": "89.00"
+        },
+        "breakup": [
+          {
+            "title": "BASE_FARE",
+            "price": {
+              "currency": "INR",
+              "value": "30.00"
+            }
+          },
+          {
+            "title": "DISTANCE_FARE",
+            "price": {
+              "currency": "INR",
+              "value": "50.00"
+            }
+          },
+          {
+            "title": "TAX",
+            "price": {
+              "currency": "INR",
+              "value": "9.00"
+            }
+          }
+        ]
+      },
+      "payments": [
+        {
+          "id": "PA1",
+          "type": "PRE-ORDER",
+          "status": "PAID",
+          "collected_by": "BPP",
+          "tags": [
+            {
+              "descriptor": {
+                "code": "BUYER_FINDER_FEES"
+              },
+              "display": false,
+              "list": [
+                {
+                  "descriptor": {
+                    "code": "BUYER_FINDER_FEES_PERCENTAGE"
+                  },
+                  "value": "1"
+                }
+              ]
+            },
+            {
+              "descriptor": {
+                "code": "SETTLEMENT_TERMS"
+              },
+              "display": false,
+              "list": [
+                {
+                  "descriptor": {
+                    "code": "SETTLEMENT_WINDOW"
+                  },
+                  "value": "PT2D"
+                },
+                {
+                  "descriptor": {
+                    "code": "SETTLEMENT_BASIS"
+                  },
+                  "value": "DELIVERY"
+                },
+                {
+                  "descriptor": {
+                    "code": "SETTLEMENT_TYPE"
+                  },
+                  "value": "upi"
+                },
+                {
+                  "descriptor": {
+                    "code": "DELAY_INTEREST"
+                  },
+                  "value": "5"
+                },
+                {
+                  "descriptor": {
+                    "code": "STATIC_TERMS"
+                  },
+                  "value": "https://bpp.mobility.example.com/static-terms.txt"
+                },
+                {
+                  "descriptor": {
+                    "code": "MANDATORY_ARBITRATION"
+                  },
+                  "value": "true"
+                },
+                {
+                  "descriptor": {
+                    "code": "COURT_JURISDICTION"
+                  },
+                  "value": "Bengaluru"
+                }
+              ]
+            }
+          ],
+          "params": {
+            "transaction_id": "upi-txn-8f2a1c",
+            "currency": "INR",
+            "amount": "89.00"
+          }
+        }
+      ]
+    }
+  }
+}

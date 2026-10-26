@@ -1,0 +1,80 @@
+{
+  "context": {
+    "domain": "ONDC:RET14",
+    "country": "IND",
+    "city": "std:080",
+    "action": "init",
+    "core_version": "1.2.5",
+    "bap_id": "bap.retail.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "bpp_id": "bpp.retail.example.com",
+    "bpp_uri": "{{BPP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "order": {
+      "provider": {
+        "id": "bpp.retail.example.com",
+        "locations": [
+          {
+            "id": "L-BLR-01"
+          }
+        ]
+      },
+      "items": [
+        {
+          "id": "I-PULSE-PRO-BLACK",
+          "location_id": "L-BLR-01",
+          "quantity": {
+            "count": 1
+          },
+          "fulfillment_id": "L-BLR-01_1"
+        }
+      ],
+      "billing": {
+        "address": {
+          "name": "Asha Rao",
+          "building": "No. 14",
+          "locality": "5th Cross, Koramangala",
+          "city": "Bengaluru",
+          "state": "Karnataka",
+          "country": "India",
+          "area_code": "560034"
+        },
+        "tax_number": "00ABCDE1234F1Z5",
+        "name": "Asha Rao",
+        "email": "asha.rao@example.com",
+        "phone": "9876543210",
+        "created_at": "2025-07-10T08:44:14.792Z",
+        "updated_at": "2025-07-10T08:44:14.792Z"
+      },
+      "fulfillments": [
+        {
+          "id": "L-BLR-01_1",
+          "type": "Delivery",
+          "end": {
+            "location": {
+              "gps": "12.9352,77.6245",
+              "address": {
+                "name": "Asha Rao",
+                "building": "No. 14",
+                "locality": "5th Cross, Koramangala",
+                "city": "Bengaluru",
+                "state": "Karnataka",
+                "country": "India",
+                "area_code": "560034"
+              }
+            },
+            "contact": {
+              "phone": "9876543210",
+              "email": "asha.rao@example.com"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

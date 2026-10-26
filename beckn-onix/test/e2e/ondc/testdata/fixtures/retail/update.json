@@ -1,0 +1,79 @@
+{
+  "context": {
+    "domain": "ONDC:RET14",
+    "country": "IND",
+    "city": "std:080",
+    "action": "update",
+    "core_version": "1.2.5",
+    "bap_id": "bap.retail.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "bpp_id": "bpp.retail.example.com",
+    "bpp_uri": "{{BPP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S"
+  },
+  "message": {
+    "update_target": "item",
+    "order": {
+      "id": "ORD-RET14-0001",
+      "items": [
+        {
+          "id": "I-PULSE-PRO-BLACK",
+          "quantity": {
+            "count": 1
+          },
+          "tags": [
+            {
+              "code": "update_type",
+              "list": [
+                {
+                  "code": "update_type",
+                  "value": "return"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "fulfillments": [
+        {
+          "id": "L-BLR-01_1_R1",
+          "type": "Return",
+          "tags": [
+            {
+              "code": "return_request",
+              "list": [
+                {
+                  "code": "id",
+                  "value": "L-BLR-01_1_R1"
+                },
+                {
+                  "code": "item_id",
+                  "value": "I-PULSE-PRO-BLACK"
+                },
+                {
+                  "code": "item_quantity",
+                  "value": "1"
+                },
+                {
+                  "code": "reason_id",
+                  "value": "001"
+                },
+                {
+                  "code": "reason_desc",
+                  "value": "Wrong size selected"
+                },
+                {
+                  "code": "initiated_by",
+                  "value": "bap.retail.example.com"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

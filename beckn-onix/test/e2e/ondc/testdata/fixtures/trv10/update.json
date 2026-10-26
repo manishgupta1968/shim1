@@ -1,0 +1,41 @@
+{
+  "context": {
+    "domain": "ONDC:TRV10",
+    "action": "update",
+    "version": "2.0.0",
+    "bap_id": "bap.mobility.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S",
+    "location": {
+      "country": {
+        "code": "IND"
+      },
+      "city": {
+        "code": "std:080"
+      }
+    },
+    "bpp_id": "bpp.mobility.example.com",
+    "bpp_uri": "{{BPP_URI}}"
+  },
+  "message": {
+    "update_target": "payments",
+    "order": {
+      "id": "O1",
+      "payments": [
+        {
+          "id": "PA1",
+          "params": {
+            "transaction_id": "upi-txn-8f2a1c",
+            "currency": "INR",
+            "amount": "89.00"
+          },
+          "status": "PAID",
+          "type": "PRE-ORDER"
+        }
+      ]
+    }
+  }
+}

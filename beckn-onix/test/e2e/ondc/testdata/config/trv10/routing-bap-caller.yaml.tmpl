@@ -1,0 +1,22 @@
+# ONDC:TRV10 (context.version 2.0.0). For 2.x versions ONIX ignores the domain, so each endpoint appears once.
+routingRules:
+  # search goes to the network gateway, which broadcasts it to the BPPs.
+  - version: "2.0.0"
+    targetType: url
+    target:
+      url: "{{ .GatewayURL }}/bg"
+    endpoints:
+      - search
+  # Everything else goes straight to the BPP named in context.bpp_uri.
+  - version: "2.0.0"
+    targetType: bpp
+    endpoints:
+      - select
+      - init
+      - confirm
+      - status
+      - track
+      - update
+      - cancel
+      - rating
+      - support

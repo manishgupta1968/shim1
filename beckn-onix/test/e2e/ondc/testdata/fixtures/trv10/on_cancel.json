@@ -1,0 +1,103 @@
+{
+  "context": {
+    "domain": "ONDC:TRV10",
+    "action": "on_cancel",
+    "version": "2.0.0",
+    "bap_id": "bap.mobility.example.com",
+    "bap_uri": "{{BAP_URI}}",
+    "transaction_id": "{{TRANSACTION_ID}}",
+    "message_id": "{{MESSAGE_ID}}",
+    "timestamp": "{{TIMESTAMP}}",
+    "ttl": "PT30S",
+    "location": {
+      "country": {
+        "code": "IND"
+      },
+      "city": {
+        "code": "std:080"
+      }
+    },
+    "bpp_id": "bpp.mobility.example.com",
+    "bpp_uri": "{{BPP_URI}}"
+  },
+  "message": {
+    "order": {
+      "id": "O1",
+      "status": "CANCELLED",
+      "provider": {
+        "id": "P1"
+      },
+      "items": [
+        {
+          "id": "I1",
+          "fulfillment_ids": [
+            "F1"
+          ],
+          "location_ids": [
+            "L1"
+          ],
+          "payment_ids": [
+            "PA1"
+          ]
+        }
+      ],
+      "fulfillments": [
+        {
+          "id": "F1",
+          "type": "DELIVERY",
+          "vehicle": {
+            "category": "AUTO_RICKSHAW"
+          },
+          "stops": [
+            {
+              "type": "START",
+              "location": {
+                "gps": "12.9715987,77.5945627"
+              }
+            },
+            {
+              "type": "END",
+              "location": {
+                "gps": "12.9352,77.6245"
+              }
+            }
+          ],
+          "state": {
+            "descriptor": {
+              "code": "RIDE_CANCELLED"
+            }
+          }
+        }
+      ],
+      "quote": {
+        "price": {
+          "currency": "INR",
+          "value": "89.00"
+        },
+        "breakup": [
+          {
+            "title": "BASE_FARE",
+            "price": {
+              "currency": "INR",
+              "value": "30.00"
+            }
+          },
+          {
+            "title": "DISTANCE_FARE",
+            "price": {
+              "currency": "INR",
+              "value": "50.00"
+            }
+          },
+          {
+            "title": "TAX",
+            "price": {
+              "currency": "INR",
+              "value": "9.00"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

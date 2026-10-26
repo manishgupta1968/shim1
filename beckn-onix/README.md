@@ -279,6 +279,9 @@ docker run -p 8081:8081 \
 
 ### Basic Usage Example
 
+> **ONDC:** the example below uses an older domain and version. For realistic ONDC messages for every endpoint
+> (TRV10 and Retail) and complete working ONIX configs, see [`test/e2e/ondc`](test/e2e/ondc/README.md).
+
 #### 1. Search for Products (BAP → BPP)
 
 ```bash

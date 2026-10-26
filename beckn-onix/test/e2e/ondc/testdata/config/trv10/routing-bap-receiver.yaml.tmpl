@@ -1,0 +1,16 @@
+routingRules:
+  - version: "2.0.0"
+    targetType: url
+    target:
+      url: "{{ .BAPBackendURL }}/ondc"
+    endpoints:
+      - on_search
+      - on_select
+      - on_init
+      - on_confirm
+      - on_status
+      - on_track
+      - on_update
+      - on_cancel
+      - on_rating
+      - on_support

@@ -1,0 +1,16 @@
+routingRules:
+  - version: "2.0.0"
+    targetType: url
+    target:
+      url: "{{ .BPPBackendURL }}/ondc"
+    endpoints:
+      - search
+      - select
+      - init
+      - confirm
+      - status
+      - track
+      - update
+      - cancel
+      - rating
+      - support
