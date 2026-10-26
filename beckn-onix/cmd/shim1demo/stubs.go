@@ -26,6 +26,10 @@ type received struct {
 	MessageID string `json:"message_id"`
 	Verified  *bool  `json:"verified,omitempty"` // bap stub only: did the signature verify?
 	Detail    string `json:"detail,omitempty"`
+	// bap stub only: the callback exactly as received, so an independent checker
+	// (for example ONDC's own sample code) can verify the signature itself.
+	Authorization string `json:"authorization,omitempty"`
+	RawBody       string `json:"raw_body,omitempty"`
 }
 
 // inbox is a small thread-safe list shared by the stub handlers.
@@ -45,7 +49,11 @@ func (b *inbox) handler() http.HandlerFunc {
 		b.mu.Lock()
 		defer b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(b.items)
+		items := b.items
+		if items == nil {
+			items = []received{} // an empty list, not null
+		}
+		_ = json.NewEncoder(w).Encode(items)
 	}
 }
 
@@ -162,7 +170,7 @@ func runBAP(args []string) error {
 		} else {
 			ok, detail = true, "signed by "+sub
 		}
-		seen.add(received{Action: action, MessageID: mid, Verified: &ok, Detail: detail})
+		seen.add(received{Action: action, MessageID: mid, Verified: &ok, Detail: detail, Authorization: header, RawBody: string(body)})
 		log.Printf("[buyer app] got %s message_id=%s signature verified=%v (%s)", action, mid, ok, detail)
 
 		w.Header().Set("Content-Type", "application/json")

@@ -22,6 +22,8 @@ type provider struct{}
 //	registryMode     stub (default) or http
 //	registryFile     stub mode: JSON file with registry entries
 //	registryUrl      http mode: registry base URL
+//	callerId, callerKeyId, callerPrivateKey
+//	                 http mode: our own identity, used to sign the lookup request
 //	gatewayActions   comma separated actions that need a gateway signature (default "search")
 //	futureSkew       how far in the future a timestamp may be (default "30s")
 //	defaultTtl       ttl to use when a request has none (default "5m")
@@ -34,7 +36,21 @@ func (provider) New(ctx context.Context, config map[string]string) (definition.S
 			Mode: config["registryMode"],
 			File: config["registryFile"],
 			URL:  config["registryUrl"],
+
+			CallerID:         config["callerId"],
+			CallerKeyID:      config["callerKeyId"],
+			CallerPrivateKey: config["callerPrivateKey"],
 		},
+	}
+	if t := config["cacheTTL"]; t != "" {
+		d, err := time.ParseDuration(t)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid cacheTTL %q: %w", t, err)
+		}
+		if d == 0 {
+			d = -1
+		}
+		cfg.Registry.CacheTTL = d
 	}
 	if v := config["gatewayActions"]; v != "" {
 		for _, a := range strings.Split(v, ",") {

@@ -34,6 +34,11 @@ type participant struct {
 	Public  string `json:"public"`
 }
 
+// ondcKeyFormat makes newParticipant store the private key the way ONDC's own sample
+// code does: base64 of the 64-byte ed25519 key (seed + public key), instead of the
+// 32-byte seed.
+var ondcKeyFormat bool
+
 func newParticipant(id, keyID string) (participant, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -42,9 +47,16 @@ func newParticipant(id, keyID string) (participant, error) {
 	return participant{
 		ID:      id,
 		KeyID:   keyID,
-		Private: base64.StdEncoding.EncodeToString(priv.Seed()),
+		Private: base64.StdEncoding.EncodeToString(privateBytes(priv)),
 		Public:  base64.StdEncoding.EncodeToString(pub),
 	}, nil
+}
+
+func privateBytes(priv ed25519.PrivateKey) []byte {
+	if ondcKeyFormat {
+		return priv
+	}
+	return priv.Seed()
 }
 
 // authHeader builds an ONDC Authorization (or X-Gateway-Authorization) header
@@ -77,7 +89,16 @@ func runKeys(args []string) error {
 	fs := flag.NewFlagSet("keys", flag.ExitOnError)
 	out := fs.String("out", "config/shim1/generated", "output folder")
 	tmplPath := fs.String("template", "config/shim1/shim1.yaml.tmpl", "Shim 1 config template")
+	regMode := fs.String("registry", "stub", `how Shim 1 reaches the registry: "stub" (reads a file) or "http" (calls "shim1demo registry")`)
+	format := fs.String("keyformat", "seed", `private key format: "seed" (32 bytes, ONIX) or "ondc" (64 bytes, as in ONDC's sample code)`)
 	fs.Parse(args)
+	switch *format {
+	case "seed":
+	case "ondc":
+		ondcKeyFormat = true
+	default:
+		return fmt.Errorf("unknown -keyformat %q (use seed or ondc)", *format)
+	}
 
 	var k demoKeys
 	for _, e := range []struct {
@@ -138,7 +159,11 @@ func runKeys(args []string) error {
 		return err
 	}
 	defer cfg.Close()
+	if *regMode != "stub" && *regMode != "http" {
+		return fmt.Errorf("unknown -registry %q (use stub or http)", *regMode)
+	}
 	if err := tmpl.Execute(cfg, map[string]string{
+		"RegistryMode": *regMode, "RegistryURL": "http://localhost:9003",
 		"SellerID": sellerID, "SellerKeyID": sellerKeyID, "SellerURI": sellerURI,
 		"SellerPrivate": k.Seller.Private, "SellerPublic": k.Seller.Public,
 	}); err != nil {

@@ -92,9 +92,9 @@ func (g *Guard) Run(ctx *model.StepContext) error {
 		return model.NewBadReqErr(model.ONDCCodeInvalidRequest, fmt.Errorf("unreadable context: %s", becknErr.Message))
 	}
 	str := func(k string) string { s, _ := c[k].(string); return s }
-	action, domain, city := str("action"), str("domain"), str("city")
+	action, domain, city, country := str("action"), str("domain"), str("city"), str("country")
 
-	if err := g.checkSenders(ctx, action, domain, city); err != nil {
+	if err := g.checkSenders(ctx, action, domain, city, country); err != nil {
 		return err
 	}
 	ttl, err := g.checkFresh(str("timestamp"), str("ttl"))
@@ -105,7 +105,7 @@ func (g *Guard) Run(ctx *model.StepContext) error {
 }
 
 // checkSenders verifies who signed the request and in what role.
-func (g *Guard) checkSenders(ctx *model.StepContext, action, domain, city string) error {
+func (g *Guard) checkSenders(ctx *model.StepContext, action, domain, city, country string) error {
 	hdr := ctx.Request.Header
 
 	if g.gateway[action] {
@@ -115,21 +115,21 @@ func (g *Guard) checkSenders(ctx *model.StepContext, action, domain, city string
 			return model.NewSignValidationErr("AUT_SIGNATURE_MISSING",
 				fmt.Errorf("%s is required for %s", model.AuthHeaderGateway, action))
 		}
-		if err := g.requireType(ctx, gw, ondcregistry.TypeBG, domain, city); err != nil {
+		if err := g.requireType(ctx, gw, ondcregistry.TypeBG, domain, city, country); err != nil {
 			return err
 		}
 	}
-	return g.requireType(ctx, hdr.Get(model.AuthHeaderSubscriber), ondcregistry.TypeBAP, domain, city)
+	return g.requireType(ctx, hdr.Get(model.AuthHeaderSubscriber), ondcregistry.TypeBAP, domain, city, country)
 }
 
 // requireType checks that the signer named in an Authorization-style header is
 // registered with the wanted type for the domain and city.
-func (g *Guard) requireType(ctx *model.StepContext, header, wantType, domain, city string) error {
+func (g *Guard) requireType(ctx *model.StepContext, header, wantType, domain, city, country string) error {
 	sub, ukID, ok := parseKeyID(header)
 	if !ok {
 		return model.NewSignValidationErr("AUT_SIGNATURE_INVALID", fmt.Errorf("cannot read keyId from header"))
 	}
-	found, err := g.reg.Find(ctx, ondcregistry.Query{SubscriberID: sub, UkID: ukID, Type: wantType, Domain: domain, City: city})
+	found, err := g.reg.Find(ctx, ondcregistry.Query{SubscriberID: sub, UkID: ukID, Type: wantType, Domain: domain, City: city, Country: country})
 	if err != nil {
 		return fmt.Errorf("ondcguard: registry lookup failed: %w", err)
 	}

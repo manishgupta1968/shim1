@@ -30,6 +30,12 @@ type req struct {
 	gateway *participant // signs X-Gateway-Authorization; nil = header left out
 	expired bool         // sign with a validity window that has already ended
 	tamper  func(message map[string]any)
+
+	rawBody       []byte // if set, these exact bytes are signed and sent (instead of context + message)
+	action        string // URL action; default is context.action
+	module        string // URL path of the Shim 1 module; default /bpp/receiver/
+	omitAuth      bool   // leave out the Authorization header
+	gatewayTamper bool   // the gateway signs a different body than the one sent
 }
 
 // sent is what came back.
@@ -49,6 +55,7 @@ type scenario struct {
 	wantMsg      string // text the error message must contain
 	reachBackend bool   // should the request get through to the seller backend?
 	callback     bool   // should a signed on_search reach the buyer app?
+	oldShape     bool   // refusal must keep the ORIGINAL ONIX shape (error inside message, no type)
 }
 
 func uuid() string {
@@ -79,21 +86,31 @@ func (r *runner) newReq(action string) req {
 
 // send signs and posts q to the seller receiver of Shim 1.
 func (r *runner) send(q req) (*sent, error) {
-	body, err := json.Marshal(map[string]any{"context": q.ctx, "message": q.message})
-	if err != nil {
-		return nil, err
+	body := q.rawBody
+	if body == nil {
+		var err error
+		if body, err = json.Marshal(map[string]any{"context": q.ctx, "message": q.message}); err != nil {
+			return nil, err
+		}
 	}
+	var err error
 	now := time.Now().Unix()
 	created, expires := now, now+300
 	if q.expired {
 		created, expires = now-600, now-300
 	}
 	headers := map[string]string{"Content-Type": "application/json"}
-	if headers["Authorization"], err = q.sender.authHeader(body, created, expires); err != nil {
-		return nil, err
+	if !q.omitAuth {
+		if headers["Authorization"], err = q.sender.authHeader(body, created, expires); err != nil {
+			return nil, err
+		}
 	}
 	if q.gateway != nil {
-		if headers["X-Gateway-Authorization"], err = q.gateway.authHeader(body, created, expires); err != nil {
+		signedByGateway := body
+		if q.gatewayTamper {
+			signedByGateway = append(append([]byte{}, body...), ' ')
+		}
+		if headers["X-Gateway-Authorization"], err = q.gateway.authHeader(signedByGateway, created, expires); err != nil {
 			return nil, err
 		}
 	}
@@ -103,8 +120,15 @@ func (r *runner) send(q req) (*sent, error) {
 			return nil, err
 		}
 	}
-	action, _ := q.ctx["action"].(string)
-	httpReq, err := http.NewRequest(http.MethodPost, r.onix+"/bpp/receiver/"+action, bytes.NewReader(body))
+	action := q.action
+	if action == "" {
+		action, _ = q.ctx["action"].(string)
+	}
+	module := q.module
+	if module == "" {
+		module = "/bpp/receiver/"
+	}
+	httpReq, err := http.NewRequest(http.MethodPost, r.onix+module+action, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +165,9 @@ func asSender(p participant) func(r *runner, q *req) {
 func (r *runner) scenarios() []scenario {
 	return []scenario{
 		{name: "valid_search", run: one("search", nil), wantStatus: 200, reachBackend: true, callback: true},
+		{name: "valid_select", run: one("select", nil), wantStatus: 200, reachBackend: true},
+		{name: "valid_init", run: one("init", nil), wantStatus: 200, reachBackend: true},
+		{name: "valid_confirm", run: one("confirm", nil), wantStatus: 200, reachBackend: true},
 		{name: "tampered_body", run: one("search", func(_ *runner, q *req) {
 			q.tamper = func(m map[string]any) { m["intent"] = map[string]any{"item": "something else"} }
 		}), wantStatus: 401, wantCode: "30016", wantType: "CORE-ERROR", wantMsg: "signature verification failed"},
@@ -173,6 +200,25 @@ func (r *runner) scenarios() []scenario {
 		{name: "stale_request", run: one("search", func(_ *runner, q *req) {
 			q.ctx["timestamp"] = time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339Nano)
 		}), wantStatus: 400, wantCode: "30022", wantType: "CONTEXT-ERROR", wantMsg: "stale request"},
+		{name: "gateway_signature_wrong", run: one("search", func(_ *runner, q *req) { q.gatewayTamper = true }),
+			wantStatus: 401, wantCode: "30016", wantType: "CORE-ERROR", wantMsg: "signature verification failed"},
+		{name: "signer_differs_from_bap_id", run: one("search", func(r *runner, q *req) { q.ctx["bap_id"] = r.keys.Pending.ID }),
+			wantStatus: 401, wantCode: "30016", wantType: "CORE-ERROR"},
+		{name: "missing_authorization_header", run: one("search", func(_ *runner, q *req) { q.omitAuth = true }),
+			wantStatus: 401, wantCode: "30016", wantType: "CORE-ERROR", wantMsg: "missing"},
+		{name: "empty_body", run: one("search", func(_ *runner, q *req) { q.rawBody = []byte{}; q.action = "search" }),
+			wantStatus: 400, wantCode: "30000", wantType: "POLICY-ERROR"},
+		{name: "body_not_json", run: one("search", func(_ *runner, q *req) { q.rawBody = []byte("this is not json"); q.action = "search" }),
+			wantStatus: 400, wantCode: "30000", wantType: "JSON-SCHEMA-ERROR"},
+		// Proves our ONIX changes did not alter other Beckn traffic: the same kind of
+		// bad request, sent to the control module (no ONDC setting) and without
+		// core_version, still gets the ORIGINAL ONIX reply shape.
+		{name: "non_ondc_request_keeps_old_shape", run: one("search", func(_ *runner, q *req) {
+			q.module = "/control/receiver/"
+			q.ctx["version"] = "1.1.0"
+			delete(q.ctx, "core_version")
+			q.gateway = nil
+		}), wantStatus: 400, wantCode: "SCH_INVALID_FORMAT", oldShape: true, wantMsg: "schema not found"},
 		{name: "replayed_message_id", run: func(r *runner) (*sent, error) {
 			q := r.newReq("select")
 			first, err := r.send(q)
@@ -254,14 +300,28 @@ func (r *runner) check(s scenario, got *sent, backendDelta int) (bool, string) {
 		if doc.Message.Ack.Status != "NACK" {
 			problems = append(problems, "ack.status is "+doc.Message.Ack.Status+", want NACK")
 		}
-		if len(doc.Message.Error) > 0 {
-			problems = append(problems, "error is inside message; ONDC wants it next to message")
-		}
-		if doc.Error.Code != s.wantCode || doc.Error.Type != s.wantType {
-			problems = append(problems, fmt.Sprintf("error is %s/%s, want %s/%s", doc.Error.Type, doc.Error.Code, s.wantType, s.wantCode))
-		}
-		if !strings.Contains(doc.Error.Message, s.wantMsg) {
-			problems = append(problems, fmt.Sprintf("error message %q lacks %q", doc.Error.Message, s.wantMsg))
+		if s.oldShape {
+			// A request that is not ONDC style must keep the original ONIX reply shape.
+			var nested struct {
+				Type, Code, Message string
+			}
+			_ = json.Unmarshal(doc.Message.Error, &nested)
+			if len(doc.Message.Error) == 0 || doc.Error.Code != "" || nested.Type != "" || nested.Code != s.wantCode {
+				problems = append(problems, "expected the ORIGINAL shape (error inside message, no type): "+got.body)
+			}
+			if !strings.Contains(nested.Message, s.wantMsg) {
+				problems = append(problems, fmt.Sprintf("error message %q lacks %q", nested.Message, s.wantMsg))
+			}
+		} else {
+			if len(doc.Message.Error) > 0 {
+				problems = append(problems, "error is inside message; ONDC wants it next to message")
+			}
+			if doc.Error.Code != s.wantCode || doc.Error.Type != s.wantType {
+				problems = append(problems, fmt.Sprintf("error is %s/%s, want %s/%s", doc.Error.Type, doc.Error.Code, s.wantType, s.wantCode))
+			}
+			if !strings.Contains(doc.Error.Message, s.wantMsg) {
+				problems = append(problems, fmt.Sprintf("error message %q lacks %q", doc.Error.Message, s.wantMsg))
+			}
 		}
 	}
 	wantBackend := 0
@@ -290,7 +350,19 @@ func runClient(args []string) error {
 	keysFile := fs.String("keys", "config/shim1/generated/keys.json", "keys.json written by `shim1demo keys`")
 	only := fs.String("only", "", "run just this scenario")
 	verbose := fs.Bool("verbose", false, "print the full answer of every scenario")
+	list := fs.Bool("list", false, "list the scenario names and stop")
+	payload := fs.String("payload", "", "send this JSON file (signed as the demo buyer app and Gateway) instead of running scenarios")
+	expect := fs.String("expect", "", `with --payload: "ack", "nack", or "nack:CODE" (exit status 1 if the answer differs)`)
+	keepIDs := fs.Bool("keep-ids", false, "with --payload: keep timestamp, transaction_id and message_id as in the file")
 	fs.Parse(args)
+
+	if *list {
+		probe := &runner{}
+		for _, s := range probe.scenarios() {
+			fmt.Println(s.name)
+		}
+		return nil
+	}
 
 	r := &runner{onix: *onix, backend: *backend, bap: *bap, http: &http.Client{Timeout: 10 * time.Second}}
 	raw, err := os.ReadFile(*keysFile)
@@ -306,6 +378,10 @@ func runClient(args []string) error {
 			return fmt.Errorf("%s is not reachable: %w", u, err)
 		}
 		resp.Body.Close()
+	}
+
+	if *payload != "" {
+		return r.runPayload(*payload, *expect, *keepIDs)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
@@ -333,6 +409,9 @@ func runClient(args []string) error {
 		want := fmt.Sprintf("HTTP %d ACK", s.wantStatus)
 		if s.wantCode != "" {
 			want = fmt.Sprintf("HTTP %d NACK %s %s", s.wantStatus, s.wantCode, s.wantType)
+			if s.oldShape {
+				want = fmt.Sprintf("HTTP %d NACK %s (old ONIX shape)", s.wantStatus, s.wantCode)
+			}
 		}
 		result, gotText := "PASS", brief(got.body)
 		if !ok {
@@ -361,4 +440,61 @@ func brief(body string) string {
 		return body[:90] + "..."
 	}
 	return body
+}
+
+// runPayload sends one JSON file to Shim 1 and prints the answer. The request is
+// signed as the demo buyer app (and, for search, the demo Gateway). The sender
+// (bap_id) is set to the demo buyer so that the signature can be checked against
+// the stub registry; the rest of the file is sent as it is.
+func (r *runner) runPayload(file, expect string, keepIDs bool) error {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return fmt.Errorf("%s is not valid JSON: %w", file, err)
+	}
+	c, ok := doc["context"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s has no context object", file)
+	}
+	c["bap_id"] = r.keys.Buyer.ID
+	if !keepIDs {
+		c["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
+		c["transaction_id"], c["message_id"] = uuid(), uuid()
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	q := req{rawBody: body, sender: r.keys.Buyer}
+	q.action, _ = c["action"].(string)
+	if q.action == "" {
+		return fmt.Errorf("%s: context.action is missing", file)
+	}
+	if q.action == "search" {
+		q.gateway = &r.keys.Gateway
+	}
+	got, err := r.send(q)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("file:    %s\naction:  %s\nstatus:  HTTP %d\nanswer:  %s\n", file, q.action, got.status, got.body)
+
+	isAck := strings.Contains(got.body, `"status":"ACK"`)
+	switch {
+	case expect == "":
+		return nil
+	case expect == "ack" && isAck:
+		fmt.Println("result:  as expected (ACK)")
+		return nil
+	case strings.HasPrefix(expect, "nack") && !isAck:
+		if code := strings.TrimPrefix(strings.TrimPrefix(expect, "nack"), ":"); code != "" && !strings.Contains(got.body, `"`+code+`"`) {
+			return fmt.Errorf("result:  NACK, but code %s not found in the answer", code)
+		}
+		fmt.Println("result:  as expected (" + expect + ")")
+		return nil
+	}
+	return fmt.Errorf("result:  NOT as expected (wanted %s)", expect)
 }

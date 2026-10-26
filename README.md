@@ -27,7 +27,8 @@ Run the demo (the first run builds everything and takes a few minutes):
 ./run-shim1-demo.sh               # or add --skip-build after the first run
 ```
 
-It sends one good `/search` and 16 bad requests, and prints PASS or FAIL for each.
+It sends good and bad requests, and prints PASS or FAIL for each. To test it yourself,
+step by step, read [docs/how-to-test-shim1.md](docs/how-to-test-shim1.md).
 
 The ONDC Registry and Gateway are not available to us, so they are stubbed, along with
 the schemas and the seller's backend. See [docs/ondc-preprocessing.md](docs/ondc-preprocessing.md)

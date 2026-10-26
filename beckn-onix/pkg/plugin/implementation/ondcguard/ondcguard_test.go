@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -201,4 +203,53 @@ func TestParseKeyID(t *testing.T) {
 			t.Errorf("parseKeyID(%q) must fail", h)
 		}
 	}
+}
+
+// Fifty identical requests arrive at the same moment: exactly one may be accepted.
+// Run with -race to also catch unsafe access to the replay table.
+func TestReplayIsSafeUnderConcurrency(t *testing.T) {
+	g := newTestGuard(fakeRegistry{})
+	const n = 50
+	var wg sync.WaitGroup
+	var accepted, refused int32
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sc := stepCtx(body("select", "m-same", fixedNow, "PT30S"), authHeader("buyer"), "")
+			<-start
+			if err := g.Run(sc); err == nil {
+				atomic.AddInt32(&accepted, 1)
+			} else {
+				atomic.AddInt32(&refused, 1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if accepted != 1 || refused != n-1 {
+		t.Errorf("accepted %d, refused %d; want exactly 1 accepted and %d refused", accepted, refused, n-1)
+	}
+}
+
+// The country of the request is passed on to the registry lookup.
+func TestCountryIsPassedToRegistry(t *testing.T) {
+	var got ondcregistry.Query
+	g := newTestGuard(recordingRegistry{&got})
+	sc := stepCtx([]byte(fmt.Sprintf(`{"context":{"action":"select","domain":"ONDC:RET10","city":"std:080","country":"IND","bap_id":"buyer","transaction_id":"t","message_id":"m","timestamp":%q,"ttl":"PT30S"}}`,
+		fixedNow.Format(time.RFC3339Nano))), authHeader("buyer"), "")
+	if err := g.Run(sc); err != nil {
+		t.Fatal(err)
+	}
+	if got.Country != "IND" || got.City != "std:080" || got.Domain != "ONDC:RET10" {
+		t.Errorf("registry was asked %+v", got)
+	}
+}
+
+type recordingRegistry struct{ last *ondcregistry.Query }
+
+func (r recordingRegistry) Find(_ context.Context, q ondcregistry.Query) ([]ondcregistry.Entry, error) {
+	*r.last = q
+	return []ondcregistry.Entry{{SubscriberID: q.SubscriberID, Type: q.Type}}, nil
 }

@@ -16,6 +16,8 @@ func (p provider) New(ctx context.Context, c map[string]string) (func(http.Handl
 	if role, ok := c["role"]; ok {
 		config.Role = role
 	}
+	// ondc: "true" answers every refusal in the ONDC shape (see reqpreprocessor.Config.ONDC).
+	config.ONDC = strings.EqualFold(strings.TrimSpace(c["ondc"]), "true")
 	if contextKeys, ok := c["contextKeys"]; ok {
 		config.ContextKeys = strings.Split(contextKeys, ",")
 	}

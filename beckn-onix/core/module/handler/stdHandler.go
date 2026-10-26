@@ -281,7 +281,8 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 	ctx := context.WithValue(r.Context(), model.ContextKeyProtocolVersion, protocolVersion)
 	ctx = context.WithValue(ctx, model.ContextKeyMsgID, messageID)
 	// ONDC requests (context.core_version) get the ONDC-style NACK body.
-	ctx = context.WithValue(ctx, model.ContextKeyONDC, isONDC)
+	// A module configured for ONDC (reqpreprocessor "ondc") has already marked the request.
+	ctx = context.WithValue(ctx, model.ContextKeyONDC, isONDC || model.IsONDC(r.Context()))
 	return &model.StepContext{
 		Context:              ctx,
 		Request:              r,

@@ -7,6 +7,7 @@
 //	keys     make demo keys, a stub ONDC Registry file and the Shim 1 config
 //	backend  stub seller business logic: answers /search, then sends on_search
 //	bap      stub buyer app: receives on_search and checks its signature
+//	registry stub ONDC registry over HTTP (POST /v2.0/lookup), for the http mode
 //	client   plays the buyer app and the Gateway; runs the test scenarios
 //
 // run-shim1-demo.sh at the repository root runs all of them together.
@@ -23,6 +24,7 @@ commands:
   keys      generate demo keys, stub registry and Shim 1 config
   backend   run the stub seller backend
   bap       run the stub buyer app
+  registry  run the stub ONDC registry over HTTP (signed lookups only)
   client    run the test scenarios against Shim 1`
 
 func main() {
@@ -38,6 +40,8 @@ func main() {
 		err = runBackend(os.Args[2:])
 	case "bap":
 		err = runBAP(os.Args[2:])
+	case "registry":
+		err = runRegistry(os.Args[2:])
 	case "client":
 		err = runClient(os.Args[2:])
 	default:

@@ -40,13 +40,18 @@ modules:
         idleConnTimeout: 300s
         responseHeaderTimeout: 5s
       plugins:
-        # STUB: reads config/shim1/generated/registry.json instead of the ONDC Registry.
-        # To use the real registry: mode: http, url: <registry base url>
+        # STUB by default: reads config/shim1/generated/registry.json instead of the ONDC
+        # Registry. For the registry over HTTP, generate with `shim1demo keys -registry http`
+        # (mode: http, url: <registry base url>; the lookup is signed with our own key).
         registry:
           id: ondcregistry
           config:
-            mode: stub
+            mode: {{.RegistryMode}}
             file: ./config/shim1/generated/registry.json
+            url: {{.RegistryURL}}
+            callerId: {{.SellerID}}
+            callerKeyId: {{.SellerKeyID}}
+            callerPrivateKey: {{.SellerPrivate}}
         keyManager:
           id: simplekeymanager
           config:
@@ -83,11 +88,17 @@ modules:
             config:
               contextKeys: transaction_id,message_id
               role: bpp
+              # Answer every refusal in the ONDC shape, even for a body that is not JSON.
+              ondc: "true"
         steps:
           - id: ondcguard
             config:
-              registryMode: stub
+              registryMode: {{.RegistryMode}}
               registryFile: ./config/shim1/generated/registry.json
+              registryUrl: {{.RegistryURL}}
+              callerId: {{.SellerID}}
+              callerKeyId: {{.SellerKeyID}}
+              callerPrivateKey: {{.SellerPrivate}}
               gatewayActions: search
               futureSkew: 30s
       steps:
@@ -114,8 +125,12 @@ modules:
         registry:
           id: ondcregistry
           config:
-            mode: stub
+            mode: {{.RegistryMode}}
             file: ./config/shim1/generated/registry.json
+            url: {{.RegistryURL}}
+            callerId: {{.SellerID}}
+            callerKeyId: {{.SellerKeyID}}
+            callerPrivateKey: {{.SellerPrivate}}
         keyManager:
           id: simplekeymanager
           config:
@@ -136,6 +151,30 @@ modules:
             config:
               contextKeys: transaction_id,message_id
               role: bpp
+              # Answer every refusal in the ONDC shape, even for a body that is not JSON.
+              ondc: "true"
       steps:
         - addRoute
         - sign
+
+  # CONTROL module, for the regression test only. It is a plain Beckn module without
+  # the ONDC setting. The test sends it a request and checks that ONIX still answers
+  # exactly as it did before our changes. Remove this module in production.
+  - name: controlReceiver
+    path: /control/receiver/
+    handler:
+      type: std
+      role: bpp
+      subscriberId: {{.SellerID}}
+      plugins:
+        schemaValidator:
+          id: schemavalidator
+          config:
+            schemaDir: ./config/shim1/schemas
+        middleware:
+          - id: reqpreprocessor
+            config:
+              contextKeys: transaction_id,message_id
+              role: bpp
+      steps:
+        - validateSchema
