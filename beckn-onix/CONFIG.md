@@ -1,0 +1,1901 @@
+# Beckn-ONIX Configuration Guide
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Configuration File Structure](#configuration-file-structure)
+3. [Top-Level Configuration](#top-level-configuration)
+4. [HTTP Configuration](#http-configuration)
+5. [Logging Configuration](#logging-configuration)
+6. [Metrics Configuration](#metrics-configuration)
+7. [Plugin Manager Configuration](#plugin-manager-configuration)
+8. [Application-Level Plugins Configuration](#application-level-plugins-configuration) (incl. [`plugins.crawler`](#pluginscrawler))
+9. [Module Configuration](#module-configuration)
+10. [Handler Configuration](#handler-configuration) (incl. [`catalogPublish`](#handler-type-catalogpublish) / [`catalogCrawl`](#handler-type-catalogcrawl) handler types)
+11. [Plugin Configuration](#plugin-configuration)
+12. [Routing Configuration](#routing-configuration)
+13. [Deployment Scenarios](#deployment-scenarios)
+14. [Configuration Examples](#configuration-examples)
+
+---
+
+## Overview
+
+Beckn-ONIX uses YAML configuration files to define its behavior. The plugin based architecture enables beckn enabled network participants to deploy onix adapter in variety of scenarios, all of which can be controlled and configured using the adapter config files and hence, understanding how the configuration is strctured is very critical.
+
+let's start with understanding following key concepts first.
+
+### Module Handler
+A Module Handler or simply handler encapsulates execution logic (steps and plugins) for partcular scenario. Scenario could be typically classified in 2 buckets, `txn caller`, outgoing call into Beckn network and `txn receiver`, incoming call from Beckn network. The handler enables flexibility to execute different steps (peformed by different plugins) for both scenarios. A single deployed onix adapter service can run multiple handlers and hence a single adapter can support multiple BAPs and/or BPPs. Each handler defines its own set of steps and plugin configurations.
+
+### Plugins
+This is a sub section to the handler, meaning each handler can load a separate set of plugins. Plugins section enlists all plugins to be loaded at the start, and further includes configuration parameters for each of the listed plugin.
+
+### Steps
+This is a list of steps that executed by the handler in the same given order.
+
+The configuration file is an input to the onix adapter and it is recommended to use different files for different deployment scenarios (local development, production, BAP-only, BPP-only, or combined).
+
+### Configuration File Locations
+
+```
+config/
+├── local-dev.yaml                    # Local development (with Vault)
+├── local-simple.yaml                 # Local development (embedded keys)
+├── local-routing.yaml                # Local routing rules
+├── onix/                             # Production combined mode
+│   ├── adapter.yaml
+│   ├── bapTxnCaller-routing.yaml
+│   ├── bapTxnReciever-routing.yaml
+│   ├── bppTxnCaller-routing.yaml
+│   ├── bppTxnReciever-routing.yaml
+│   └── plugin.yaml
+├── onix-bap/                         # Production BAP-only mode
+│   ├── adapter.yaml
+│   ├── bapTxnCaller-routing.yaml
+│   ├── bapTxnReciever-routing.yaml
+│   └── plugin.yaml
+└── onix-bpp/                         # Production BPP-only mode
+    ├── adapter.yaml
+    ├── bppTxnCaller-routing.yaml
+    ├── bppTxnReciever-routing.yaml
+    └── plugin.yaml
+```
+
+---
+
+## Beckn Constants
+
+ONIX ships with a signed `pkg/beckndefaults/beckn-constants.yaml` file carrying values defined by the Beckn ecosystem. The plugin manager loads, signature-verifies, and injects these automatically at plugin creation time. Operators do not need to — and should not — set these values in their adapter config files.
+
+**Locked constants** — startup fails if user config contradicts:
+
+| Plugin | Key |
+|---|---|
+| `dediregistry` | `url` |
+
+**Overridable constants** — injected automatically; if user sets a different value it is accepted and logged at WARN:
+
+| Plugin | Key | Default |
+|---|---|---|
+| `schemav2validator` | `type` | `url` |
+| `schemav2validator` | `location` | Beckn Protocol v2.0.0-lts spec URL |
+
+When `schemav2validator.type` is set to `file`, `location` is no longer governed and may point freely to a local file path.
+
+### `pluginManager.becknConstants`
+
+**Type**: `object`  **Required**: No
+
+Controls the constants loader inside the plugin manager.
+
+```yaml
+pluginManager:
+  root: ./plugins
+  becknConstants:
+    disableRemoteRefresh: true
+```
+
+#### `disableRemoteRefresh`
+**Type**: `boolean`  **Default**: `false`  
+**Description**: Skip the remote refresh and use only the shipped baseline file. Use for air-gapped deployments.
+
+---
+
+## Configuration File Structure
+
+### Main Configuration File (adapter.yaml)
+
+The main configuration file follows this structure:
+
+```yaml
+appName: "onix-local"
+log: {...}
+metrics: {...}
+http: {...}
+pluginManager: {...}
+modules: [...]
+```
+
+---
+
+## Top-Level Configuration
+
+### `appName`
+**Type**: `string`  
+**Required**: Yes  
+**Description**: Application identifier used in logging and monitoring.
+
+**Example**:
+```yaml
+appName: "onix-local"
+```
+
+---
+
+## HTTP Configuration
+
+### `http`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: HTTP server configuration including port and timeout settings.
+
+#### Parameters:
+
+##### `port`
+**Type**: `string`  
+**Required**: Yes  
+**Description**: Port number on which the HTTP server listens.  
+**Example**: `"8081"`, `"8080"`
+
+##### `timeout`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: HTTP timeout configurations.
+
+###### `timeout.read`
+**Type**: `integer` (seconds)  
+**Required**: Yes  
+**Default**: `30`  
+**Description**: Maximum duration for reading the entire request, including the body.
+
+###### `timeout.write`
+**Type**: `integer` (seconds)  
+**Required**: Yes  
+**Default**: `30`  
+**Description**: Maximum duration before timing out writes of the response.
+
+###### `timeout.idle`
+**Type**: `integer` (seconds)  
+**Required**: Yes  
+**Default**: `30`  
+**Description**: Maximum amount of time to wait for the next request when keep-alives are enabled.
+
+**Example**:
+```yaml
+http:
+  port: 8081
+  timeout:
+    read: 30
+    write: 30
+    idle: 30
+```
+
+---
+
+## Logging Configuration
+
+### `log`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: Logging configuration for the application.
+
+#### Parameters:
+
+##### `level`
+**Type**: `string`  
+**Required**: Yes  
+**Options**: `debug`, `info`, `warn`, `error`, `fatal`  
+**Description**: Sets the minimum log level. Messages below this level will not be logged.
+
+##### `destinations`
+**Type**: `array`  
+**Required**: Yes  
+**Description**: List of log output destinations.
+
+###### `destinations[].type`
+**Type**: `string`  
+**Options**: `stdout`, `file`  
+**Description**: Type of log destination.
+
+##### `contextKeys`
+**Type**: `array` of `string`  
+**Required**: No  
+**Description**: Context keys to include in structured logs for request tracing.  
+**Common Values**: `transaction_id`, `message_id`, `subscriber_id`, `module_id`
+
+**Example**:
+```yaml
+log:
+  level: debug
+  destinations:
+    - type: stdout
+  contextKeys:
+    - transaction_id
+    - message_id
+    - subscriber_id
+    - module_id
+```
+
+---
+
+## Application-Level Plugins Configuration
+
+### `plugins`
+**Type**: `object`  
+**Required**: No  
+**Description**: Application-level plugin configurations. These plugins apply to the entire application and are shared across all modules.
+
+#### `plugins.otelsetup`
+**Type**: `object`  
+**Required**: No  
+**Description**: OpenTelemetry (OTLP) configuration for metrics, traces, and logs. When configured, telemetry is exported to an OTLP collector endpoint. Omit this block to run without telemetry.
+
+##### Parameters:
+
+###### `id`
+**Type**: `string`  
+**Required**: Yes  
+**Description**: Plugin identifier. Must be `"otelsetup"`.
+
+###### `config`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: Plugin configuration parameters.
+
+###### `config.otlpEndpoint`
+**Type**: `string`  
+**Required**: Yes (when OtelSetup is used)  
+**Description**: OTLP gRPC endpoint (host:port) for exporting metrics, traces, and logs. Example: `"localhost:4317"`, `"otel-collector-bap:4317"`.
+
+###### `config.serviceName`
+**Type**: `string`  
+**Required**: No  
+**Default**: `"beckn-onix"`  
+**Description**: Sets the `service.name` resource attribute.
+
+###### `config.serviceVersion`
+**Type**: `string`  
+**Required**: No  
+**Description**: Sets the `service.version` resource attribute.
+
+###### `config.environment`
+**Type**: `string`  
+**Required**: No  
+**Default**: `"development"`  
+**Description**: Sets the `deployment.environment` attribute (e.g., `development`, `staging`, `production`).
+
+###### `config.domain`
+**Type**: `string`  
+**Required**: No  
+**Default**: `"9090"`  
+**Description**: Port on which the metrics HTTP server will listen. The metrics endpoint is hosted on a separate server from the main application.
+
+###### `config.enableMetrics`
+**Type**: `string` (boolean)  
+**Required**: No  
+**Default**: `"false"`  
+**Description**: Enables metrics collection and OTLP metric export. Use `"true"` or `"false"` as a string.
+
+###### `config.enableTracing`
+**Type**: `string` (boolean)  
+**Required**: No  
+**Default**: `"false"`  
+**Description**: Enables trace export via OTLP. Use `"true"` or `"false"` as a string.
+
+###### `config.enableLogs`
+**Type**: `string` (boolean)  
+**Required**: No  
+**Default**: `"false"`  
+**Description**: Enables log export via OTLP (e.g. audit logs). Use `"true"` or `"false"` as a string.
+
+###### `config.timeInterval`
+**Type**: `string` (integer)  
+**Required**: No  
+**Default**: `"5"`  
+**Description**: Time interval in seconds used for periodic metric export or batching.
+
+###### `config.auditFieldsConfig`
+**Type**: `string`  
+**Required**: No  
+**Description**: Path to a YAML file that defines which request/response fields are included in audit logs, per action. See [Audit fields configuration](#audit-fields-configuration). Example: `"/app/config/audit-fields.yaml"`.
+
+
+**Example - OTLP export with audit logs** (e.g. `config/local-beckn-one-bap.yaml`):
+```yaml
+plugins:
+  otelsetup:
+    id: otelsetup
+    config:
+      serviceName: "beckn-one-bap"
+      serviceVersion: "1.0.0"
+      environment: "development"
+      domain: "ev_charging"
+      otlpEndpoint: "otel-collector-bap:4317"
+      enableMetrics: "true"
+      enableTracing: "true"
+      enableLogs: "true"
+      timeInterval: "5"
+      networkMetricsGranularity: "2min"
+      networkMetricsFrequency: "4min"
+      auditFieldsConfig: "/app/config/audit-fields.yaml"
+```
+
+#### `plugins.crawler`
+**Type**: `object`  
+**Required**: No  
+**Description**: The catalog crawler's own configuration. Unlike `registry`/`signer`/etc. under a module's `handler.plugins`, this is an **application-level, singleton background job** — it is constructed and started once at process startup (independent of any module/HTTP path), not loaded lazily per request. It discovers Beckn catalog indexes on a schedule, fetches and self-signature-verifies changed catalogs, and pushes them to a Discovery service. See [`pkg/plugin/implementation/catalogcrawler/README.md`](pkg/plugin/implementation/catalogcrawler/README.md) for the full set of config keys (`dbDsn`, `networks`, `discoveryPushUrl`, etc.) and how signature verification works.
+
+Deliberately kept at this level rather than under a module: it lets a deployment run scheduled background crawling with **no** on-demand HTTP trigger exposed at all (omit the `catalogCrawl` module below), or both together (configure this plus the module). Omit `plugins.crawler` entirely to disable the crawler altogether — the `catalogCrawl` module, if present, will then fail to trigger anything since there is no running crawler.
+
+**Requires** `plugins.registry` (below) — every fetched index entry and catalog file is self-signed, and the registry plugin is the only source of the signing keys checked against.
+
+##### `plugins.registry` / `plugins.cache` (crawler's own)
+**Type**: `object`  
+**Required**: `registry` required whenever `plugins.crawler` is configured; `cache` optional  
+**Description**: The crawler's own `RegistryLookup`/`RegistryMetadataLookup` (key distribution + network-scoped provider discovery) and optional `Cache` in front of it. Same plugin config shape as the module-level [Registry Plugin](#1-registry-plugin) / [Cache Plugin](#4-cache-plugin) sections below — this is a separate instance from whatever a module's own `handler.plugins.registry` configures, since this one lives at the application level and is wired to the crawler, not to any request-handling module.
+
+**Example** (e.g. `config/local-beckn-one-bpp.yaml`):
+```yaml
+plugins:
+  registry:
+    id: dediregistry
+    config:
+      timeout: 10
+      retry_max: 3
+      retry_wait_min: 100ms
+      retry_wait_max: 500ms
+  cache:
+    id: cache
+    config:
+      addr: redis:6379
+  crawler:
+    id: catalogcrawler
+    config:
+      dbDsn: "postgres://user:pass@localhost:5432/catalogcrawler"
+      networks: "example.network.production"
+      discoveryPushUrl: "https://discovery.example.org/beckn/catalog/push"
+      participantId: "bpp.example.org"
+      bppUri: "https://bpp.example.org"
+```
+
+To also expose the on-demand HTTP trigger and status query for this crawler, add a module with handler type `catalogCrawl` — see [`catalogCrawl` handler type](#handler-type-catalogcrawl) below. That module takes no `plugins` of its own: both its `/trigger` and `/status` sub-endpoints call directly into this same running crawler instance.
+
+### Audit fields configuration
+
+When `config.auditFieldsConfig` points to a YAML file, audit logs (emitted via OTLP when `enableLogs: "true"`) include only the fields you list per action. The file format:
+
+```yaml
+auditRules:
+  default:                           # Optional: fallback for actions without a specific list
+    - context.transaction_id
+    - context.message_id
+    - context.action
+    - context.domain
+    - context.bap_id
+    - context.bpp_id
+  discover:
+    - context.transaction_id
+    - context.message_id
+    - context.action
+    - context.timestamp
+    - message.filters
+    - message.spatial
+  select:
+    - context.transaction_id
+    - context.message_id
+    - context.action
+    - message.order.beckn:buyer.beckn:id
+    # ... more dot-path fields
+```
+
+- **Top-level key**: `auditRules`.
+- **Action keys**: Use Beckn action names (e.g. `discover`, `select`, `init`, `confirm`, `update`, `track`, `cancel`, `rating`, `support`). Use `default` for actions that do not have a specific list.
+- **Values**: List of dot-path strings into the request/response JSON (e.g. `context.transaction_id`, `message.order.beckn:id`). Namespaced keys use colons (e.g. `beckn:id`).
+
+See `config/audit-fields.yaml` for a full example.
+
+### Metrics Collected
+
+When OtelSetup is configured with `otlpEndpoint`, metrics and traces are exported via OTLP (no separate metrics HTTP server). Scrape metrics from your OTLP collector 
+
+Metrics are organized by module for better maintainability and encapsulation:
+
+#### OTel Setup (from `otelsetup` plugin)
+- OTLP export for metrics, traces, and logs (gRPC endpoint). 
+- Go runtime instrumentation (`go_*`), resource attributes, and meter/tracer provider wiring.
+- When `enableLogs: "true"` and `auditFieldsConfig` is set, audit logs are emitted via OTLP with fields defined in the audit-fields YAML.
+
+#### Step Execution Metrics (from `telemetry` package)
+- `onix_step_executions_total`, `onix_step_execution_duration_seconds`, `onix_step_errors_total`
+
+#### Handler Metrics (from `handler` module)
+- `onix_http_request_count` – HTTP requests by status class, route, method, role, sender, recipient (and optional network metric attributes).
+- `beckn_signature_validations_total` - Signature validation attempts
+- `beckn_schema_validations_total` - Schema validation attempts
+- `onix_routing_decisions_total` - Routing decisions taken by handler
+
+#### Cache Metrics (from `cache` plugin)
+- `onix_cache_operations_total`, `onix_cache_hits_total`, `onix_cache_misses_total`
+
+#### Plugin Metrics (from `telemetry` package)
+- `onix_plugin_execution_duration_seconds`, `onix_plugin_errors_total`
+
+#### Beckn Constants Info (from `telemetry` package)
+- `beckn_constants_info` – Observable gauge (value always `1`) emitted once at startup, **only for plugins running with a non-canonical beckn constant value**. Each deviation becomes its own time series. Labels: `plugin_id`, `key`, `canonical`, `actual`. Nodes running all canonical values emit no series for this gauge — their absence is the signal. Enables Network Facilitator Organisations to identify nodes deviating from Beckn-defined defaults.
+
+#### Node Plugin Info (from `telemetry` package)
+- `onix_plugin_info` – Observable gauge (value always `1`) emitted once per loaded plugin per module at startup. Each loaded plugin becomes its own time series. Labels: `module`, `plugin_type`, `plugin_id`, and `subscriber_id` (only present when `subscriberId` is set in the handler config — omitted otherwise). Covers all plugin slots (`schema_validator`, `sign_validator`, `router`, `registry`, `publisher`, `signer`, `cache`, `transport_wrapper`, `policy_checker`, `key_manager`) and one series per `step` and `middleware` entry. Absent/unconfigured slots emit no series. Enables Network Orchestrators to verify plugin composition across ONIX nodes, including detection of custom or non-standard plugins. **Note:** the `subscriber_id` column in Grafana will be blank unless `subscriberId` is configured in each module's handler config.
+
+#### Runtime Metrics
+- Go runtime metrics (`go_*`) and Redis instrumentation via `redisotel`
+
+Each metric includes consistent labels such as `module`, `role`, `action`, `status`, `step`, `plugin_id`, and `schema_version` to enable low-cardinality dashboards.
+
+**Note**: Metric definitions are now located in their respective modules:
+- OTel setup: `pkg/plugin/implementation/otelsetup`
+- Step metrics: `core/module/handler/step_metrics.go`
+- Handler metrics: `core/module/handler/handlerMetrics.go`
+- Cache metrics: `pkg/plugin/implementation/cache/cache_metrics.go`
+- Plugin metrics: `pkg/telemetry/pluginMetrics.go`
+- Node plugin info: `pkg/telemetry/nodeInfo.go`
+
+---
+
+## Plugin Manager Configuration
+
+### `pluginManager`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: Configuration for the plugin management system.
+
+#### Parameters:
+
+##### `root`
+**Type**: `string`  
+**Required**: Yes  
+**Description**: Local directory path where plugin binaries (`.so` files) are stored.  
+**Example**: `./plugins`, `/app/plugins`
+
+##### `remoteRoot`
+**Type**: `string`  
+**Required**: No  
+**Description**: Path to remote plugin bundle (typically in GCS or S3) for production deployments.  
+**Example**: `/mnt/gcs/plugins/plugins_bundle.zip`
+
+**Example**:
+```yaml
+pluginManager:
+  root: ./plugins
+  remoteRoot: /mnt/gcs/plugins/plugins_bundle.zip
+```
+
+---
+
+## Module Configuration
+
+### `modules`
+**Type**: `array`  
+**Required**: Yes  
+**Description**: List of transaction processing modules. Each module represents an HTTP endpoint handler with its own configuration.
+
+#### Module Types:
+
+There are four main module types in Beckn-ONIX:
+
+1. **bapTxnReceiver**: Receives callback responses at BAP from BPP
+2. **bapTxnCaller**: Sends outgoing requests from BAP to BPP/Gateway
+3. **bppTxnReceiver**: Receives incoming requests at BPP from BAP
+4. **bppTxnCaller**: Sends callback responses from BPP to BAP
+
+#### Parameters:
+
+##### `name`
+**Type**: `string`  
+**Required**: Yes  
+**Description**: Unique identifier for the module.  
+**Example**: `bapTxnReceiver`, `bapTxnCaller`, `bppTxnReceiver`, `bppTxnCaller`
+
+##### `path`
+**Type**: `string`  
+**Required**: Yes  
+**Description**: HTTP path prefix for this module's endpoints.  
+**Example**: `/bap/receiver/`, `/bap/caller/`, `/bpp/receiver/`, `/bpp/caller/`
+
+##### `handler`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: Handler configuration for processing requests. See [Handler Configuration](#handler-configuration).
+
+**Example**:
+```yaml
+modules:
+  - name: bapTxnReceiver
+    path: /bap/receiver/
+    handler:
+      type: std
+      role: bap
+      # ... handler configuration
+```
+
+---
+
+## Handler Configuration
+
+### `handler`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: Defines how requests are processed by a module.
+
+#### Parameters:
+
+##### `type`
+**Type**: `string`  
+**Required**: Yes  
+**Options**: `std` (standard beckn-protocol handler), `catalogPublish` (DS-internal catalog/publish trigger), `catalogCrawl` (the `/crawl/*` endpoint family — trigger + status)  
+**Description**: Type of handler. `std` is the standard Beckn-protocol request/response handler used by `bapTxnReceiver`/`bapTxnCaller`/`bppTxnReceiver`/`bppTxnCaller`-style modules; `catalogPublish` is an unsigned, same-operator DS-internal trigger, not a network-facing Beckn action. `catalogCrawl` covers a whole sub-routed endpoint family under one type — an unsigned trigger (`/trigger`) and a status query (`/status`) that's eventually signed but not yet. See [`catalogPublish`](#handler-type-catalogpublish) and [`catalogCrawl`](#handler-type-catalogcrawl) below.
+
+<a name="handler-type-catalogpublish"></a>
+###### Handler type: `catalogPublish`
+
+A DS-internal, unsigned catalog/publish trigger. It invokes the [`catalogPublisher` plugin](#15-catalogpublisher-plugin) (below) synchronously with the catalogs in the request body and returns a per-catalog `ACCEPTED`/`REJECTED` result — no `validateSign`/`addRoute`/`signAck` pipeline, since the caller is the operator's own tooling, not another network participant. See the [plugin README](pkg/plugin/implementation/catalogpublisher/README.md) for the full model.
+
+Unlike `catalogCrawl`, this handler type **does** take its own `handler.plugins` (`catalogPublisher`, `catalogBlobStore`, `keyManager`, and `registry`/`cache` to satisfy `keyManager`'s constructor) — see the [`catalogPublisher` plugin](#15-catalogpublisher-plugin) and [`catalogBlobStore` plugin](#16-catalogblobstore-plugin) sections for those.
+
+**Request body** — matches beckn.yaml's `CatalogPublishAction` envelope shape as closely as possible:
+```json
+{
+  "context": { "action": "catalog/publish" },
+  "message": {
+    "catalogs": [ { "id": "ds.local.dev/CAT-1", "descriptor": {"...": "..."}, "provider": {"...": "..."}, "resources": [] } ],
+    "publishDirectives": [
+      { "catalogId": "ds.local.dev/CAT-1", "catalogType": "REGULAR", "visibleTo": ["retail-network"], "forceBaseline": false }
+    ]
+  },
+  "retire": ["ds.local.dev/CAT-OLD"]
+}
+```
+- `message.catalogs[]`: plain Beckn `Catalog` objects, matched to a `publishDirectives[]` entry by top-level `id`.
+- `message.publishDirectives[].visibleTo`: restricts this catalog's Discovery-service relevance to the listed network ids (maps to `NetworkIds`); omitted means visible to all.
+- `message.publishDirectives[].catalogType`: `MASTER`/`REGULAR`, required once `schemaValidator` is configured (unlike the internal default of `REGULAR` when empty).
+- `message.publishDirectives[].forceBaseline`: **per-catalog** — bypasses diffing against prior state and always emits a fresh baseline for just this one catalog (also how to trigger compaction). Not a beckn.yaml field; lives here (not top-level) because a call publishing several catalogs at once may want to force a baseline for only one of them.
+- `retire`: top-level list of catalogIds to retire (tombstone) this call, independent of `message.catalogs[]`. A catalogId present in both `retire` and `message.catalogs[]` is published normally — `retire` is ignored for it.
+
+**Response** — `200 OK`:
+```json
+{
+  "status": "COMPLETED",
+  "results": [ { "catalogId": "ds.local.dev/CAT-1", "status": "ACCEPTED", "version": 3 } ],
+  "warnings": []
+}
+```
+`status` is `"FAILED"` if any catalog hit a fatal `PublishError`; individual outcomes are always in `results[]` regardless (`status: "ACCEPTED"` or `"REJECTED"` with a `reason`).
+
+**Example**:
+```yaml
+modules:
+  - name: catalogPublish
+    path: /catalog/publish
+    handler:
+      type: catalogPublish
+      role: bpp
+      plugins:
+        registry:
+          id: dediregistry
+          config: { timeout: 10 }
+        keyManager:
+          id: simplekeymanager
+          config: { subscriberId: bpp.example.com, ... }
+        catalogBlobStore:
+          id: localcatalogblobstore
+          config: { root: /catalog }
+        catalogPublisher:
+          id: catalogpublisher
+          config: { nextUpdateIn: "336h" }
+```
+
+<a name="handler-type-catalogcrawl"></a>
+###### Handler type: `catalogCrawl`
+
+The whole `/crawl/*` endpoint family as **one handler type**, mounted at a path ending in `/` (e.g. `/crawl/`) and sub-routed internally on the remaining path — `trigger` and `status` today, a future addition is a new case inside the plugin's own dispatch rather than a new handler type/module block. Both sub-endpoints call into the already-running crawler configured via [`plugins.crawler`](#pluginscrawler) (top-level, not per-module); it takes no `handler.plugins` of its own. Requires `plugins.crawler` to be configured — otherwise the whole module fails to register (`RegisterHandler` is only called when the crawler exists — see [`pkg/plugin/implementation/catalogcrawler/README.md`](pkg/plugin/implementation/catalogcrawler/README.md)).
+
+**`POST {path}trigger`** — an on-demand crawl trigger, unsigned, unaffected by `authDisabled`:
+
+Request body — either form is accepted, and both may be combined (merged into one list):
+```json
+{ "networkId": "example.network.production" }
+```
+```json
+{ "networkIds": ["example.network.production", "example.network.staging"] }
+```
+
+Response — `202 Accepted` on success:
+```json
+{ "runId": "3fa2c1e0-4b1a-4c9e-9c3a-6a2f8e0b7d21" }
+```
+On failure (e.g. no `networkId(s)` given, or the crawler isn't running), a `400`/`500` with `{"error": "..."}`.
+
+**`GET {path}status`** — crawl/sync status for a publisher's own catalogs. Eventually a **signed,
+network-facing** query, verifying the caller the same way every subscriber-facing call in this
+codebase does (`signValidator`/`keyManager`) so a publisher can only ever see their own catalogs'
+status. **That verification is not implemented yet.** Right now this sub-endpoint only serves
+requests when `handler.authDisabled` is `true` — checked per request (not at module construction,
+so a missing/false `authDisabled` can't take down `/trigger`); omitting it (or `false`) rejects
+every status request. With `authDisabled: true`, the caller's identity is an unauthenticated
+`?subscriberId=` query param, not a verified one — **do not use this in any real deployment
+as-is.**
+
+Request: `GET`, required `?subscriberId=` (unauthenticated for now — see above), optional
+`?catalogId=`. `catalogId` absent, returns every catalog owned by `subscriberId`.
+
+Response — `200 OK`, one entry per catalog:
+```json
+[
+  {
+    "catalogId": "staging.p-node.fabric.nfh.global/CAT-1",
+    "indexUrl": "https://angular-absently-gab.ngrok-free.dev/beckn/index/becknCatalogs.index.json",
+    "everSynced": true,
+    "version": 2,
+    "entryVersion": 2,
+    "retired": false,
+    "queued": false,
+    "updatedAt": "2026-08-24T16:33:44Z",
+    "indexLastPolledAt": "2026-08-24T16:33:44Z"
+  },
+  {
+    "catalogId": "staging.p-node.fabric.nfh.global/CAT-2",
+    "everSynced": false,
+    "queued": true
+  },
+  {
+    "catalogId": "staging.p-node.fabric.nfh.global/CAT-3",
+    "everSynced": true,
+    "queued": false,
+    "abandoned": true,
+    "parkCount": 48,
+    "abandonedAt": "2026-08-25T09:00:00Z",
+    "lastError": "crawler: signature verification failed: Ed25519 signature verification failed"
+  }
+]
+```
+`everSynced: false` (CAT-2 above) means this catalog is queued for its very first sync — `version`/`entryVersion`/`retired`/`lastError`/`updatedAt` are all zero-valued since nothing has settled yet; check `queued` for whether that first sync is pending right now. `lastError`/`attempts`/`nextAttemptAt` appear only when relevant (a past failure, or `queued: true`). `parked`/`abandoned` (CAT-3 above, mutually exclusive with `queued`) report the crawler's revive-or-abandon sweep state — see [`pkg/plugin/implementation/catalogcrawler/README.md`](pkg/plugin/implementation/catalogcrawler/README.md#parked-and-abandoned-catalogs) — with `parkCount`/`abandonedAt` alongside; `lastError` there is the actual reason the catalog kept failing (e.g. a persistent signature-verification mismatch), not just "something failed." A non-empty `catalogId` matching nothing at all — not even a pending first sync — (or belonging to a different subscriber — the two are indistinguishable on purpose) is a `404`; an absent `catalogId` matching nothing is a `200` with `[]`.
+
+**Example** (registers both `/crawl/trigger` and `/crawl/status`):
+```yaml
+modules:
+  - name: crawl
+    path: /crawl/
+    handler:
+      type: catalogCrawl
+      authDisabled: true # required for /crawl/status -- see above; /crawl/trigger is unaffected
+```
+
+##### `role`
+**Type**: `string`  
+**Required**: Yes  
+**Options**: `bap`, `bpp`  
+**Description**: Role of this handler in the Beckn protocol.
+
+##### `subscriberId`
+**Type**: `string`  
+**Required**: No  
+**Description**: Subscriber ID for the participant. Used primarily for BPP modules.  
+**Example**: `bpp1`
+
+##### `authDisabled`
+**Type**: `boolean`  
+**Required**: No, only meaningful for [`catalogCrawl`](#handler-type-catalogcrawl)'s `/status` sub-endpoint  
+**Default**: `false`  
+**Description**: For sub-endpoints that require signed-request verification, skips it and takes the caller's identity from a plain, unauthenticated request parameter instead. Currently the only such sub-endpoint is `catalogCrawl`'s `/status`, whose signed-verification path isn't implemented yet — it checks `authDisabled: true` per request (an unset/`false` value rejects every `/status` request, but never affects `/trigger`, which needs no auth of its own). **Never set `true` for a sub-endpoint whose auth is actually implemented, or in any real deployment.**
+
+##### `httpClientConfig`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: HTTP client configuration for outgoing requests.
+
+###### `maxIdleConns`
+**Type**: `integer`  
+**Default**: `1000`  
+**Description**: Maximum number of idle connections across all hosts.
+
+###### `maxIdleConnsPerHost`
+**Type**: `integer`  
+**Default**: `200`  
+**Description**: Maximum idle connections to keep per host.
+
+###### `idleConnTimeout`
+**Type**: `duration`  
+**Default**: `300s`  
+**Description**: Maximum time an idle connection remains open.
+
+###### `responseHeaderTimeout`
+**Type**: `duration`  
+**Default**: `5s`  
+**Description**: Time to wait for server response headers.
+
+##### `plugins`
+**Type**: `object`  
+**Required**: Yes  
+**Description**: Plugin configurations. See [Plugin Configuration](#plugin-configuration).
+
+##### `steps`
+**Type**: `array` of `string`  
+**Required**: Yes  
+**Description**: Ordered list of processing steps to execute for each request.  
+**Common Steps**:
+- `validateSign` - Validate digital signature
+- `validateSchema` - Validate against JSON schema
+- `mediateSchema` - Translate schema objects for cross-version interoperability
+- `addRoute` - Determine routing destination
+- `sign` - Sign outgoing request
+- `storePayload` - Record request payload in cache
+- `transformPayload` - Apply JSONata payload transformation
+- `publish` - Publish to message queue
+
+**Example**:
+```yaml
+handler:
+  type: std
+  role: bap
+  httpClientConfig:
+    maxIdleConns: 1000
+    maxIdleConnsPerHost: 200
+    idleConnTimeout: 300s
+    responseHeaderTimeout: 5s
+  plugins:
+    # ... plugin configurations
+  steps:
+    - validateSign
+    - addRoute
+    - validateSchema
+```
+
+---
+
+## Plugin Configuration
+
+### Plugin Structure
+
+Each plugin configuration follows this structure:
+
+```yaml
+pluginName:
+  id: plugin-identifier
+  config:
+    key1: value1
+    key2: value2
+```
+
+### Available Plugins
+
+#### 1. Registry Plugin
+
+**Purpose**: Lookup participant information from Beckn registry.
+
+**Configuration**:
+```yaml
+registry:
+  id: registry
+  config:
+    url: http://localhost:8080/reg
+    retry_max: 3
+    retry_wait_min: 100ms
+    retry_wait_max: 500ms
+```
+
+**Parameters**:
+- `url`: Registry endpoint URL
+- `retry_max`: Maximum number of retry attempts
+- `retry_wait_min`: Minimum wait time between retries
+- `retry_wait_max`: Maximum wait time between retries
+
+---
+
+#### 2. Dediregistry Plugin
+
+**Purpose**: Lookup participant information from a Decentralized Directory (DeDi) registry.
+
+**Configuration**:
+```yaml
+registry:
+  id: dediregistry
+  config:
+    url: "https://fabric.nfh.global/registry/dedi"
+    allowedNetworkIDs: "commerce-network.org/prod,local-commerce.org/production"
+    timeout: 30
+    retry_max: 3
+    retry_wait_min: 1s
+    retry_wait_max: 5s
+```
+
+**Parameters**:
+- `url`: Beckn registry base URL including the `/dedi` path (Required; must be an absolute `http://` or `https://` URL with a host and no query or fragment, checked at startup; a trailing slash is trimmed)
+- `allowedNetworkIDs`: Comma-separated list of allowed network IDs used to restrict lookup results to specific networks. See [Beckn network setup documentation](https://docs.beckn.io/creating-an-open-network/setting-up-the-network-environment#registering-the-network-on-beckn-fabric) for more on network IDs. (Optional)
+- `cacheTTL`: How long a `Lookup` result is cached: a Go duration with a unit (e.g. `300s`, `5m`); a bare number is rejected with a warning and the default is used, and zero or negative also means the default. A positive `data.ttl` in the DeDi response (in seconds) overrides it. Unlike `schemav2validator`'s `cacheTTL`, this is not a number of seconds. (Optional, default: 5m)
+- `timeout`: Request timeout in seconds (Optional, default: client default)
+- `retry_max`: Maximum number of retry attempts (Optional, default: 4)
+- `retry_wait_min`: Minimum wait time between retries in duration format (Optional, default: 1s)
+- `retry_wait_max`: Maximum wait time between retries in duration format (Optional, default: 30s)
+
+---
+
+#### 3. Key Manager Plugin
+
+**Purpose**: Manage cryptographic keys for signing and verification.
+
+##### Vault-based Key Manager (Production)
+
+```yaml
+keyManager:
+  id: keymanager
+  config:
+    projectID: beckn-onix-local
+    vaultAddr: http://localhost:8200
+    kvVersion: v2
+    mountPath: beckn
+```
+
+**Parameters**:
+- `projectID`: GCP project ID or identifier
+- `vaultAddr`: HashiCorp Vault address
+- `kvVersion`: Vault KV secrets engine version (`v1` or `v2`)
+- `mountPath`: Vault mount path for secrets
+
+##### Secrets Manager Key Manager (Production)
+
+```yaml
+keyManager:
+  id: secretskeymanager
+  config:
+    projectID: ${projectID}
+```
+
+**Parameters**:
+- `projectID`: GCP project ID (supports environment variable substitution)
+
+##### Simple Key Manager (Development)
+
+```yaml
+keyManager:
+  id: simplekeymanager
+  config: {}
+```
+
+**Parameters**: None required. Uses embedded Ed25519 keys stored in the binary.
+
+---
+
+#### 4. Cache Plugin
+
+**Purpose**: Redis-based caching for responses.
+
+```yaml
+cache:
+  id: cache
+  config:
+    addr: localhost:6379
+```
+
+**Or for production with Redis cluster:**
+
+```yaml
+cache:
+  id: redis
+  config:
+    addr: 10.81.192.4:6379
+```
+
+**Or with TLS enabled:**
+
+```yaml
+cache:
+  id: cache
+  config:
+    addr: redis.example.com:6380
+    use_tls: "true"
+```
+
+**Parameters**:
+- `addr`: Redis server address and port
+- `use_tls`: Enable TLS connection to Redis (`"true"` to enable, omit or any other value to disable). Default: disabled.
+
+---
+
+#### 5. Schema Validator Plugin
+
+**Purpose**: Validate requests/responses against JSON schemas.
+
+```yaml
+schemaValidator:
+  id: schemavalidator
+  config:
+    schemaDir: ./schemas
+```
+
+**Parameters**:
+- `schemaDir`: Directory containing JSON schema files organized by domain and version
+
+---
+
+#### 6. Schema2Validator Plugin
+
+**Purpose**: Validate requests against OpenAPI 3.x specifications. Supports core protocol validation, optional auxiliary specs for extended action verbs, and optional extended validation for domain-specific objects with `@context` references.
+
+```yaml
+schemaValidator:
+  id: schemav2validator
+  config:
+    cacheTTL: "3600"
+    extendedSchema_enabled: "true"
+    extendedSchema_cacheTTL: "86400"
+    extendedSchema_maxCacheSize: "100"
+    extendedSchema_downloadTimeout: "30"
+    extendedSchema_allowedDomains: "beckn.org,example.com"
+```
+
+**Or for local files** (set `type` and `location` directly; a WARN is logged at startup):
+
+```yaml
+schemaValidator:
+  id: schemav2validator
+  config:
+    type: "file"
+    location: ./validation-scripts/l2-config/mobility_1.1.0_openapi_3.1.yaml
+    cacheTTL: "3600"
+    extendedSchema_enabled: "false"
+```
+
+**With auxiliary specs** (to add network-specific or domain-specific action verbs on top of the primary Beckn spec):
+
+```yaml
+schemaValidator:
+  id: schemav2validator
+  config:
+    type: url
+    location: https://raw.githubusercontent.com/beckn/protocol-specifications-v2/refs/tags/core-v2.0.0-lts/api/v2.0.0/beckn.yaml
+    cacheTTL: "3600"
+    auxiliaryTypes: "file,dir"
+    auxiliaryLocations: "/etc/onix/schemas/energy-verbs.yaml,/etc/onix/schemas/domain/"
+```
+
+Auxiliary specs are additive — they may only introduce new action verbs not already present in the primary spec. A collision with the primary spec is a hard error and the adapter will not start. If an auxiliary spec fails to load at startup, it is skipped and an error is logged; the primary spec remains active. The `dir` type loads all top-level `*.yaml`, `*.yml`, and `*.json` files in the specified directory.
+
+**Parameters**:
+- `type`: **Injected automatically** from beckn constants (default: `"url"`). Set to `"file"` for local specs; ONIX will log a WARN at startup.
+- `location`: **Injected automatically** from beckn constants when `type` is `"url"`. Set freely when `type` is `"file"`.
+- `cacheTTL`: Cache TTL in seconds before reloading all specs (default: `"3600"`)
+- `auxiliaryTypes`: Comma-separated list of source types for auxiliary specs (`"url"`, `"file"`, or `"dir"`)
+- `auxiliaryLocations`: Comma-separated list of locations for auxiliary specs — must have the same number of entries as `auxiliaryTypes`
+- `extendedSchema_enabled`: Enable extended schema validation for `@context` objects (default: `"false"`)
+- `extendedSchema_cacheTTL`: Domain schema cache TTL in seconds (default: `"86400"`)
+- `extendedSchema_maxCacheSize`: Max cached schemas (default: `"100"`)
+- `extendedSchema_downloadTimeout`: Schema download timeout in seconds (default: `"30"`)
+- `extendedSchema_allowedDomains`: Comma-separated domain whitelist (empty = all allowed)
+
+---
+
+#### 7. Sign Validator Plugin
+
+**Purpose**: Validate Ed25519 digital signatures on incoming requests.
+
+```yaml
+signValidator:
+  id: signvalidator
+  config:
+    clockSkewToleranceSeconds: 5   # optional — see parameters below
+```
+
+**Parameters**:
+
+- `clockSkewToleranceSeconds` *(optional, integer, default: `5`)*: Maximum number of seconds the `created` timestamp in an inbound signature header may be ahead of the server clock. Accommodates NTP drift between network participants. Per the Beckn Auth & Trust spec the recommended default is 5 s; NFOs may configure a stricter or more permissive value for their subnet.
+  - A value of `0` enforces strict same-second validation.
+  - Values greater than `10` are accepted but trigger a startup warning — large tolerances widen the replay window.
+  - **The `expires` field always uses zero tolerance regardless of this setting.** An expired signature is rejected unconditionally.
+
+---
+
+#### 8. Router Plugin
+
+**Purpose**: Determine routing destination based on rules.
+
+```yaml
+router:
+  id: router
+  config:
+    routingConfig: ./config/local-routing.yaml
+```
+
+**Or for production:**
+
+```yaml
+router:
+  id: router
+  config:
+    routingConfigPath: /mnt/gcs/configs/bapTxnCaller-routing.yaml
+```
+
+**Parameters**:
+- `routingConfig` or `routingConfigPath`: Path to routing rules YAML file
+
+---
+
+#### 9. Signer Plugin
+
+**Purpose**: Sign outgoing requests with Ed25519 signature.
+
+```yaml
+signer:
+  id: signer
+```
+
+**Parameters**: None required. Uses key manager for private key.
+
+---
+
+#### 10. Publisher Plugin
+
+**Purpose**: Publish messages to RabbitMQ or Pub/Sub for asynchronous processing.
+
+```yaml
+publisher:
+  id: publisher
+  config:
+    project: ${projectID}
+    topic: bapNetworkReciever
+```
+
+**Parameters**:
+- `project`: GCP project ID for Pub/Sub
+- `topic`: Pub/Sub topic name
+
+---
+
+#### 11. Middleware Plugin
+
+**Purpose**: Request preprocessing like UUID generation and header manipulation.
+
+```yaml
+middleware:
+  - id: reqpreprocessor
+    config:
+      role: bap
+      contextKeys: transaction_id,message_id,subscriber_id,module_id
+```
+
+**Parameters**:
+- `contextKeys`: Comma-separated list of fields to auto-generate UUIDs for if missing
+- `role`: BAP or BPP role for request processing
+
+---
+
+#### 12. ReqMapper Plugin (Step)
+
+**Purpose**: Run payload transformation at an explicit point in the step pipeline. This is the safe option for receiver flows where signature and schema validation must happen on the original inbound network payload before any mutation.
+
+`reqmapper` owns the mappings file; execution of each mapping is delegated to an injected `Translator` plugin, so the expression language is a config-driven choice, not something `reqmapper` hard-codes.
+
+```yaml
+plugins:
+  payloadTransformer:
+    id: reqmapper
+    config:
+      role: bap               # Use `bpp` when running inside a BPP handler
+      mappingsFile: ./config/mappings.yaml
+  translator:                 # Optional — defaults to jsonatatranslator when omitted
+    id: jsonatatranslator
+steps:
+  - validateSign
+  - validateSchema
+  - transformPayload
+  - addRoute
+```
+
+For caller modules, place `transformPayload` before signing:
+
+```yaml
+steps:
+  - transformPayload
+  - addRoute
+  - sign
+  - validateSchema
+```
+
+**Parameters**:
+- `role`: Required. Determines which JSONata expression is evaluated (`bapMappings` or `bppMappings`) for the current action.
+- `mappingsFile`: Required. Absolute or relative path to a YAML file that contains the JSONata expressions for every action.
+- `translator`: Optional. Plugin ID of the `Translator` that executes mappings. Defaults to `jsonatatranslator` (built by `install/build-plugins.sh`), shared with `schemaVersionMediator` if both are configured on the same handler. Swap it to run mappings through a different execution engine without changing `reqmapper` itself. Note: a malformed mapping now fails at first use rather than at adapter startup, since compilation moved behind the `Translator` interface.
+
+**Mapping file structure**:
+```yaml
+mappings:
+  <action-name>:
+    bapMappings: |
+      # JSONata expression applied when `role: bap`
+    bppMappings: |
+      # JSONata expression applied when `role: bpp`
+```
+Each action entry is optional—if no mapping exists for the current action, the original request body is passed through unchanged. JSONata expressions receive the entire Beckn request as input (`$`) and must return the full payload that should replace it.
+
+A failing transform is rejected with a NACK rather than silently falling back to the untransformed body — see the error codes table below.
+
+**Error codes returned by `transformPayload` step:**
+
+| Code                           | Cause                                                                                                                                                                                                                                                |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SCH_SCHEMA_ADAPTATION_FAILED` | The JSONata expression failed with a type mismatch or other dynamic runtime error (`T*`/`D*`), indicating that the input payload does not match the shape expected by the mapping. Review the mapping expression against the actual request payload. |
+| `BIZ_GENERIC_ERROR`            | The failure was not caused by a payload shape mismatch. The request could not be marshalled before evaluation, or evaluation failed because of a JSONata resource error (for example, recursion depth exceeded, timeout, or panic recovery).         |
+
+**Sample mapping file**:
+```yaml
+mappings:
+  search:
+    bapMappings: |
+      {
+        "context": {
+          "action": "discover",
+          "version": "2.0.0",
+          "domain": "beckn.one:retail",
+          "bap_id": $.context.bap_id,
+          "bap_uri": $.context.bap_uri,
+          "transaction_id": $.context.transaction_id,
+          "message_id": $.context.message_id,
+          "timestamp": $.context.timestamp
+        },
+        "message": {
+          "filters": $.message.intent.category ? {
+            "type": "jsonpath",
+            "expression": "$[?(@.category.code == '" & $.message.intent.category.descriptor.code & "')]"
+          } : null
+        }
+      }
+    bppMappings: |
+      {
+        "context": {
+          "action": "search",
+          "version": "1.1.0",
+          "domain": "retail",
+          "bap_id": $.context.bap_id,
+          "bap_uri": $.context.bap_uri,
+          "transaction_id": $.context.transaction_id,
+          "message_id": $.context.message_id,
+          "timestamp": $.context.timestamp
+        },
+        "message": {
+          "intent": {
+            "category": $.message.filters ? {
+              "descriptor": {
+                "code": $substringAfter($substringBefore($.message.filters.expression, "'"), "== '")
+              }
+            } : null
+          }
+        }
+      }
+  on_search:
+    bapMappings: |
+      {
+        "context": $.context,
+        "message": {
+          "catalog": {
+            "descriptor": $.message.catalogs[0]."beckn:descriptor" ? {
+              "name": $.message.catalogs[0]."beckn:descriptor"."schema:name"
+            } : null
+          }
+        }
+      }
+    bppMappings: |
+      {
+        "context": $.context,
+        "message": {
+          "catalogs": [{
+            "@type": "beckn:Catalog",
+            "beckn:items": $.message.catalog.providers[].items[].
+              {
+                "@type": "beckn:Item",
+                "beckn:id": id
+              }
+          }]
+        }
+      }
+```
+The sample illustrates how a single mapping file can convert `search` requests and `on_search` responses between Beckn 1.1.0 (BAP) and Beckn 2.0.0 (BPP) payload shapes. You can define as many action entries as needed, and the plugin will compile and cache the JSONata expressions on startup.
+
+---
+
+#### 13. SchemaVersionMediator Plugin
+
+**Purpose**: Mediate schema version differences between Beckn participants. When a BAP and BPP declare different schema object versions in their node manifests, this plugin fetches JSONata translation artifacts from the network's artifact registry and transforms the payload so each side receives data in the version it expects.
+
+**Requirements**: A `manifestLoader` plugin must be configured in the same handler. Translation artifacts are executed via an injected `Translator` — optional to configure explicitly; defaults to `jsonatatranslator` when omitted, shared with `reqmapper`'s `payloadTransformer` step if both are configured on the same handler.
+
+```yaml
+translator:                 # optional — defaults to jsonatatranslator when omitted
+  id: jsonatatranslator
+schemaVersionMediator:
+  id: schemaversionmediator
+  config:
+    nodeId: "nfh.global/subscribers.beckn.one/open-kitchen-bpp"
+    action: translate
+    onFailure: reject
+    fetchTimeout: "30s"
+    artifactCacheTTL: "24h"
+    negativeCacheTTL: "5m"
+    maxCacheEntries: "500"
+```
+
+**Parameters**:
+
+| Key | Values | Default | Description |
+|---|---|---|---|
+| `nodeId` | string | — | **Required.** Three-part DeDi subscriber identity for this node (`namespace/registry/recordId`). Used at startup to load the local node manifest. |
+| `action` | `translate` \| `reject` | `translate` | What to do when schema objects are incompatible. `translate` fetches and applies an artifact; `reject` returns `SCH_SCHEMA_ADAPTATION_FAILED` immediately. |
+| `onFailure` | `reject` \| `passThrough` | `reject` | Applied when an artifact cannot be fetched (`action=translate`), or, on caller handlers, the counterparty manifest cannot be loaded (any `action`). `passThrough` forwards the untranslated payload — operator escape hatch only, not for production. |
+| `fetchTimeout` | duration string | `"30s"` | HTTP timeout for each artifact fetch (e.g. `"10s"`, `"1m"`). |
+| `artifactCacheTTL` | duration string | `"24h"` | How long to cache successfully fetched translation artifacts. |
+| `negativeCacheTTL` | duration string | `"5m"` | How long to cache artifact-not-found responses. |
+| `maxCacheEntries` | integer string | `"500"` | Maximum entries in the artifact cache. |
+
+**Step ordering — `validateSchema` must come before `mediateSchema`:**
+
+```yaml
+steps:
+  - validateSign
+  - validateSchema      # validates source payload in its declared schema version
+  - mediateSchema       # translates domain schema objects if versions differ
+  - addRoute
+```
+
+This order is universal for both caller and receiver handlers. Schema definitions are publicly available and versioned, so the schema validator can validate any version payload via `@context` URL resolution. Translating before validation would leave `@context` pointing at the source version while the field structure reflects the target — an inconsistency that extended schema validation (`extendedSchema_enabled: "true"`) would misread.
+
+**Minimal example — receiver handler with schema mediation enabled:**
+
+```yaml
+modules:
+  - name: bppTxnReceiver
+    path: /bpp/receiver/
+    handler:
+      type: std
+      role: bpp
+      plugins:
+        registry:
+          id: dediregistry
+          config:
+            url: "https://fabric.nfh.global/registry/dedi"
+        manifestLoader:
+          id: manifestloader
+          config:
+            url: "https://fabric.nfh.global/registry/dedi"
+        schemaVersionMediator:
+          id: schemaversionmediator
+          config:
+            nodeId: "nfh.global/subscribers.beckn.one/open-kitchen-bpp"
+            action: translate
+            onFailure: reject
+        signValidator:
+          id: signvalidator
+        schemaValidator:
+          id: schemav2validator
+          config:
+            type: url
+            location: https://raw.githubusercontent.com/beckn/protocol-specifications-v2/refs/tags/core-v2.0.0-lts/api/v2.0.0/beckn.yaml
+            extendedSchema_enabled: "true"
+      steps:
+        - validateSign
+        - validateSchema
+        - mediateSchema
+        - addRoute
+```
+
+**Error codes returned by `mediateSchema` step:**
+
+| Code | Cause |
+|---|---|
+| `SCH_SUBSCRIBER_NOT_FOUND` | Local node manifest absent or has no `schemaObjects` at startup. Restart after publishing the manifest to DeDi. |
+| `SCH_SCHEMA_ADAPTATION_FAILED` | Two causes share this code: (1) incompatible schema objects and `action=reject`, or artifact fetch or counterparty-manifest lookup failed and `onFailure=reject`; (2) translation artifact dropped fields present in the source payload (not yet implemented — no code path constructs this case). |
+
+---
+
+#### 14. PayloadStore Plugin
+
+**Purpose**: Record every inbound request payload processed by the handler, indexed by `message_id` and `transaction_id`, with TTL-based expiration via the cache backend. Provides the stateful foundation for plugins that need transaction history.
+
+**Requirements**: A `cache` plugin must be configured in the same handler.
+
+**Configuration**:
+```yaml
+payloadStore:
+  id: payloadstore
+  config:
+    ttl: "24h"
+    indexTTL: "25h"
+    maxBodyBytes: "1048576"
+    storeBody: "true"
+    storeSignature: "true"
+    compress: "false"
+```
+
+**Parameters**:
+- `ttl`: Per-entry lifetime for each stored message. Default: `"24h"`.
+- `indexTTL`: Lifetime of the transaction-to-message-ID index. Must be >= `ttl`. Defaults to `ttl + 1h` if omitted. Set it slightly longer than `ttl` so the index outlives the last entry it references.
+- `maxBodyBytes`: Maximum bytes stored for the request body. Bodies exceeding this limit are truncated before storage. Set to `"0"` for no limit. Default: `"1048576"` (1 MiB).
+- `storeBody`: Whether to persist the request body. Set to `"false"` to store metadata only. Default: `"true"`.
+- `storeSignature`: Whether to persist the raw `Authorization` header as the `Signature` field. Useful for non-repudiation and countersignature validation. BAP handlers log a startup warning when this is explicitly set to `"false"`. Default: `"true"`.
+- `compress`: Applies gzip compression to stored body bytes before writing to cache, reducing Redis memory usage. Default: `"false"`.
+
+**Steps integration**: Add `storePayload` to the handler's `steps` list. Placement controls which requests are recorded — placing it after `validateSign` means only signed requests are stored.
+
+```yaml
+steps:
+  - validateSign
+  - storePayload
+  - validateSchema
+  - addRoute
+```
+
+---
+
+#### 14. VC Validator Plugin (Step)
+
+**Purpose**: Verify [W3C Verifiable Credentials](https://www.w3.org/TR/vc-data-model-2.0/) embedded in request payloads for configured beckn actions. Checks the proof signature (VC-JWT, resolving the issuer key via `did:key` / `did:jwk` / `did:web`), issuer binding, validity window, and revocation status (StatusList2021 / BitstringStatusList, DEDI registry, generic). Any failure rejects the request with a signed NACK before it reaches routing. See the [plugin README](pkg/plugin/implementation/vcvalidator/README.md) for the full verification model and NACK failure classes.
+
+**Configuration** (wired as a handler `plugins.steps` entry, then referenced by id in the `steps` list):
+```yaml
+plugins:
+  steps:
+    - id: validateVC
+      config:
+        enabled: "true"
+        actions: "confirm"
+        allowedDidMethods: "key,jwk,web"
+        checkExpiry: "true"
+        checkRevocation: "true"
+        requireProof: "true"
+        failOpen: "false"
+        httpTimeout: "10"
+        maxCredentials: "10"
+        allowPrivateNetworks: "false"
+        debugLogging: "false"
+steps:
+  - validateSign
+  - validateVC
+  - validateSchema
+  - addRoute
+```
+
+**Parameters**:
+- `enabled`: Master switch; when `"false"` every request passes through untouched. Default: `"true"`.
+- `actions`: Comma-separated list of beckn actions whose payloads are gated (e.g. `"confirm,init"`). **Required** when enabled — there is no code default, so the gated messages are always visible from the config.
+- `allowedDidMethods`: Permitted issuer / verification-method DID methods. Default: `"key,jwk,web"`.
+- `checkExpiry`: Enforce `validFrom`/`validUntil` and JWT `nbf`/`exp`. Default: `"true"`.
+- `checkRevocation`: Check `credentialStatus` revocation entries. Default: `"true"`.
+- `requireProof`: Reject credentials whose proof this plugin cannot cryptographically verify (e.g. JSON-LD Data Integrity proofs). Default: `"true"`.
+- `failOpen`: On transient network errors during did:web resolution or revocation fetches, `"true"` allows the credential through, `"false"` rejects. Default: `"false"` (fail closed).
+- `httpTimeout`: Bounds each did:web / revocation-list fetch, in seconds (or a Go duration). Default: `"10"`.
+- `maxCredentials`: Maximum embedded credentials per request; a request exceeding it is rejected with a Bad Request NACK before any network I/O. Default: `"10"`.
+- `allowPrivateNetworks`: Permit did:web / revocation fetches to private, loopback or link-local addresses. These URLs come from the request body, so the plugin blocks non-public destinations by default (SSRF protection, enforced on the resolved IP at the dial layer, redirects capped at 3 hops). Set to `"true"` only for local deployments whose issuers/registries live on a private network. Default: `"false"`.
+- `debugLogging`: Verbose per-credential logging. Default: `"false"`.
+
+#### 15. CatalogPublisher Plugin
+
+**Purpose**: Implements the DS-internal catalog/publish operation used by the [`catalogPublish` handler type](#handler-type-catalogpublish) — diffing a submitted catalog against its prior state (baseline vs. change file), signing the result, and optionally compacting/republishing a "latest" pointer. See the [plugin README](pkg/plugin/implementation/catalogpublisher/README.md) for the full baseline/change-file/compaction model. Requires a `keyManager` (for signing) and a [`catalogBlobStore`](#16-catalogblobstore-plugin) (below) — both configured as sibling entries under the same module's `handler.plugins`.
+
+**Configuration** (e.g. `config/local-beckn-one-bpp.yaml`'s `catalogPublish` module):
+```yaml
+plugins:
+  catalogPublisher:
+    id: catalogpublisher
+    config:
+      # subscriberId is optional here -- if omitted, the handler derives
+      # it automatically from this same module's keyManager.subscriberId.
+      # Set it explicitly only if it must legitimately differ.
+      catalogBaseURL: "https://your-tunnel.ngrok-free.app"
+      nextUpdateIn: "336h"
+      publishLatest: "true"
+      gzip: "true"
+      compactionChangeCountThreshold: "20"
+      compactionSizeRatioThreshold: "0.5"
+      checkCatalogIndexLink: "true"
+```
+
+**Parameters**:
+- `subscriberId`: The signing identity to load via `keyManager.Keyset`. Optional — defaults to this module's `handler.plugins.keyManager.config.subscriberId` when unset.
+- `catalogBaseURL`: The public URL prefix everything this plugin publishes is addressed under (index/catalog/change files). Unset leaves a `"pending-artifact-store://..."` placeholder in published URLs until you point it at a real public location (e.g. an ngrok tunnel onto `catalogBlobStore`'s `root`).
+- `nextUpdateIn`: A Go duration (e.g. `"336h"`) setting the index's freshness window (`next_update`). Zero/unset omits it from the index (a catalog file's own `next_update` is still stamped regardless).
+- `publishLatest`: Maintain each catalog's "latest" full-content pointer at a stable URL, for consumers who don't want to apply `changes[]` themselves. Default: `"true"`.
+- `gzip`: Serve every published file gzip-compressed. Default: `"true"`.
+- `compactionChangeCountThreshold`: Automatically compact (fresh baseline instead of another change file) once this many pending change files have accumulated. `0`/unset disables. Default: `0`.
+- `compactionSizeRatioThreshold`: Automatically compact once pending change files' combined size is at least this fraction of the baseline's size (e.g. `"0.5"` for 50%). `0`/unset disables. Default: `0`.
+- `checkCatalogIndexLink`: Read-only, warn-only check (via `dediregistry`, using this same module's `keyManager.subscriberId`/keyId) of whether this node's DeDi registry record already links this publisher's catalog index (`meta.catalog_index_urls`, an array of `{url}` objects). A miss is reported as a `PublishResult` warning, never a failure. Requires the module's `registry` plugin to implement `RegistryMetadataLookup` (e.g. `dediregistry`). Default: `"false"`.
+
+Per-catalog controls (`forceBaseline`, `visibleTo`, `catalogType`, `retire`) live in the **request body** (`message.publishDirectives[]`/top-level `retire`), not in this plugin config — see [`catalogPublish` handler type](#handler-type-catalogpublish) below.
+
+#### 16. CatalogBlobStore Plugin
+
+**Purpose**: Where `catalogPublisher` reads prior published state from and persists new publish results to. `localcatalogblobstore` is a filesystem-backed implementation.
+
+**Configuration**:
+```yaml
+plugins:
+  catalogBlobStore:
+    id: localcatalogblobstore
+    config:
+      root: /catalog
+```
+
+**Parameters**:
+- `root`: **Required**. Local directory root the store reads/writes under. Should be the same path a reverse proxy / tunnel serves publicly at `catalogPublisher.config.catalogBaseURL`, so published URLs actually resolve.
+
+---
+
+## Routing Configuration
+
+### Routing Rules File Structure
+
+Routing configuration is stored in separate YAML files referenced by the router plugin.
+
+```yaml
+routingRules:
+  - domain: "retail:1.1.0"
+    version: "1.1.0"
+    targetType: "url"
+    target:
+      url: "http://localhost:9001/beckn"
+      excludeAction: false
+    endpoints:
+      - search
+      - select
+      - init
+      - confirm
+```
+
+### Routing Rule Parameters
+
+#### `domain`
+**Type**: `string`  
+**Required**: Conditional (Required for v1.x.x, Optional for v2.x.x)  
+**Description**: Beckn domain identifier (e.g., `retail:1.1.0`, `ONDC:TRV10`, `nic2004:60221`)
+
+**Version-Specific Behavior**:
+- **Beckn Protocol v1.x.x**: Domain is **required**. Each rule must specify a domain, and routing uses domain as a key.
+- **Beckn Protocol v2.x.x**: Domain is **optional** and ignored during routing. If provided, a warning is logged. All v2 rules are domain-agnostic.
+- **Conflict Detection**: For v2, multiple rules with the same version and endpoint (regardless of domain) will cause a configuration error.
+
+**Examples**:
+```yaml
+# Valid v1 rule - domain required
+- domain: "ONDC:TRV10"
+  version: "1.1.0"
+  targetType: "url"
+  target:
+    url: "http://backend:3000"
+  endpoints:
+    - search
+
+# Valid v2 rule - domain optional (omitted)
+- version: "2.0.0"
+  targetType: "url"
+  target:
+    url: "http://backend:3000"
+  endpoints:
+    - search
+
+# Valid v2 rule - domain provided (warning logged, but ignored)
+- domain: "ONDC:TRV10"
+  version: "2.0.0"
+  targetType: "url"
+  target:
+    url: "http://backend:3000"
+  endpoints:
+    - search
+```
+
+#### `version`
+**Type**: `string`  
+**Required**: Yes  
+**Description**: Protocol version for this domain
+
+#### `targetType`
+**Type**: `string`  
+**Required**: Yes  
+**Options**: `url`, `bpp`, `bap`, `msgq`  
+**Description**: Type of routing destination
+
+##### Target Types Explained:
+
+1. **`url`**: Route to a specific URL
+   ```yaml
+   targetType: "url"
+   target:
+     url: "http://backend-service:3000/api"
+     excludeAction: false  # If true, don't append endpoint to URL
+   ```
+
+2. **`bpp`**: Route to BPP specified in request's `bpp_uri`
+   ```yaml
+   targetType: "bpp"
+   target:
+     url: "https://gateway.example.com"  # Optional fallback URL
+   endpoints:
+     - search
+   ```
+
+3. **`bap`**: Route to BAP specified in request's `bap_uri`
+   ```yaml
+   targetType: "bap"
+   endpoints:
+     - on_search
+     - on_select
+   ```
+
+4. **`msgq`**: Route to message queue (Pub/Sub)
+   ```yaml
+   targetType: "msgq"
+   target:
+     topic_id: "search_requests"
+   ```
+
+#### `target`
+**Type**: `object`  
+**Required**: Depends on `targetType`  
+**Description**: Target destination details
+
+##### `target.url`
+**Type**: `string`  
+**Description**: Target URL for `url` type, or fallback URL for `bpp`/`bap` types
+
+##### `target.excludeAction`
+**Type**: `boolean`  
+**Default**: `false`  
+**Description**: For `url` type, whether to exclude appending endpoint name to URL path
+
+##### `target.topic_id`
+**Type**: `string`  
+**Description**: Pub/Sub topic ID for `msgq` type
+
+##### `target.publisherId`
+**Type**: `string`  
+**Description**: Publisher ID for `publisher` type (deprecated in favor of `msgq`)
+
+#### `endpoints`
+**Type**: `array` of `string`  
+**Required**: Yes  
+**Description**: List of Beckn protocol endpoints this rule applies to
+
+**Common Endpoints**:
+- BAP Caller: `search`, `select`, `init`, `confirm`, `status`, `track`, `cancel`, `update`, `rating`, `support`
+- BPP Caller: `on_search`, `on_select`, `on_init`, `on_confirm`, `on_status`, `on_track`, `on_cancel`, `on_update`, `on_rating`, `on_support`
+
+### Routing Configuration Examples
+
+#### Example 1: Simple URL Routing
+
+```yaml
+routingRules:
+  - domain: "retail:1.1.0"
+    version: "1.1.0"
+    targetType: "url"
+    target:
+      url: "http://backend-service:3000/retail/v1"
+    endpoints:
+      - search
+      - select
+      - init
+```
+
+**Behavior**: All `search`, `select`, and `init` requests for `retail:1.1.0` will be routed to:
+- `http://backend-service:3000/retail/v1/search`
+- `http://backend-service:3000/retail/v1/select`
+- `http://backend-service:3000/retail/v1/init`
+
+#### Example 2: BPP Dynamic Routing
+
+```yaml
+routingRules:
+  - domain: "ONDC:TRV10"
+    version: "2.0.0"
+    targetType: "bpp"
+    target:
+      url: "https://gateway.example.com"
+    endpoints:
+      - search
+  
+  - domain: "ONDC:TRV10"
+    version: "2.0.0"
+    targetType: "bpp"
+    endpoints:
+      - select
+      - init
+      - confirm
+```
+
+**Behavior**: 
+- For `search`: Route to gateway URL if `bpp_uri` is missing from request
+- For other endpoints: Route to `bpp_uri` from request context (required)
+
+#### Example 3: Mixed Routing
+
+```yaml
+routingRules:
+  - domain: "ONDC:TRV10"
+    version: "2.0.0"
+    targetType: "url"
+    target:
+      url: "https://services-backend/trv/v1"
+    endpoints:
+      - select
+      - init
+      - confirm
+
+  - domain: "ONDC:TRV10"
+    version: "2.0.0"
+    targetType: "msgq"
+    target:
+      topic_id: "trv_search_requests"
+    endpoints:
+      - search
+```
+
+**Behavior**:
+- `select`, `init`, `confirm`: Routed to backend URL
+- `search`: Published to Pub/Sub topic for asynchronous processing
+
+#### Example 4: URL with excludeAction
+
+```yaml
+routingRules:
+  - domain: "retail:1.1.0"
+    version: "1.1.0"
+    targetType: "url"
+    target:
+      url: "http://backend:3000/webhook"
+      excludeAction: true
+    endpoints:
+      - search
+      - select
+```
+
+**Behavior**: All endpoints route to exactly `http://backend:3000/webhook` without appending the endpoint name.
+
+#### Example 5: Beckn Protocol v2 Domain-Agnostic Routing
+
+```yaml
+routingRules:
+  # v2 rule without domain (recommended)
+  - version: "2.0.0"
+    targetType: "url"
+    target:
+      url: "https://gateway.example.com/v2"
+    endpoints:
+      - search
+      - select
+      - init
+      - confirm
+
+  # v1 rules still require domain
+  - domain: "ONDC:TRV10"
+    version: "1.1.0"
+    targetType: "url"
+    target:
+      url: "https://gateway.example.com/v1/trv"
+    endpoints:
+      - search
+```
+
+**Behavior**: 
+- v2 requests (version `2.0.0`) route to gateway regardless of domain in request
+- v1 requests (version `1.1.0`) route based on domain matching
+- Domain field is ignored for v2 routing decisions
+
+#### Example 6: v2 Conflict Detection
+
+```yaml
+# INVALID CONFIGURATION - Will fail at startup
+routingRules:
+  - domain: "ONDC:TRV10"
+    version: "2.0.0"
+    targetType: "url"
+    target:
+      url: "https://backend-a.com"
+    endpoints:
+      - search
+  
+  - domain: "ONDC:TRV11"  # Different domain, but same version and endpoint
+    version: "2.0.0"
+    targetType: "url"
+    target:
+      url: "https://backend-b.com"
+    endpoints:
+      - search  # ERROR: Duplicate v2 rule for 'search' endpoint
+```
+
+**Error**: Configuration will fail with: `duplicate endpoint 'search' found for version 2.0.0. For v2.x.x, domain is ignored, so you can only define each endpoint once per version. Please remove the duplicate rule`
+
+**Fix**: For v2, use a single rule per endpoint since domain is ignored:
+```yaml
+routingRules:
+  - version: "2.0.0"
+    targetType: "url"
+    target:
+      url: "https://unified-backend.com"
+    endpoints:
+      - search
+```
+
+---
+
+## Deployment Scenarios
+
+### 1. Local Development (Simple Mode)
+
+**File**: `config/local-simple.yaml`
+
+**Characteristics**:
+- Uses `simplekeymanager` (no Vault required)
+- Embedded Ed25519 keys
+- Local Redis
+- Simplified routing
+- Optional metrics collection (available on separate port when enabled)
+
+**Use Case**: Quick local development and testing
+
+```yaml
+appName: "onix-local"
+log:
+  level: debug
+metrics:
+  enabled: true
+  exporterType: prometheus
+  serviceName: onix-local
+http:
+  port: 8081
+modules:
+  - name: bapTxnReceiver
+    handler:
+      plugins:
+        keyManager:
+          id: simplekeymanager
+          config: {}
+```
+
+**Metrics Access**: When enabled, access metrics at `http://localhost:9090/metrics` (default metrics port, configurable via `plugins.otelsetup.config.metricsPort`)
+
+### 2. Local Development (Vault Mode)
+
+**File**: `config/local-dev.yaml`
+
+**Characteristics**:
+- Uses `keymanager` with local Vault
+- Full production-like setup
+- Local Redis and Vault
+
+**Use Case**: Testing with production key management
+
+```yaml
+modules:
+  - name: bapTxnReceiver
+    handler:
+      plugins:
+        keyManager:
+          id: keymanager
+          config:
+            projectID: beckn-onix-local
+            vaultAddr: http://localhost:8200
+```
+
+### 3. Production Combined Mode
+
+**File**: `config/onix/adapter.yaml`
+
+**Characteristics**:
+- Handles both BAP and BPP
+- GCP Secrets Manager for keys
+- Production Redis
+- Remote plugin loading
+- Pub/Sub integration
+- OpenTelemetry metrics enabled (available on separate port, default: 9090)
+
+**Use Case**: Single deployment serving both roles
+
+```yaml
+appName: "onix-production"
+log:
+  level: info
+  destinations:
+    - type: stdout
+metrics:
+  enabled: true
+  exporterType: prometheus
+  serviceName: beckn-onix
+  serviceVersion: "1.0.0"
+pluginManager:
+  root: /app/plugins
+  remoteRoot: /mnt/gcs/plugins/plugins_bundle.zip
+modules:
+  - name: bapTxnReciever
+    handler:
+      plugins:
+        keyManager:
+          id: secretskeymanager
+          config:
+            projectID: ${projectID}
+        cache:
+          id: redis
+          config:
+            addr: 10.81.192.4:6379
+        publisher:
+          id: publisher
+          config:
+            project: ${projectID}
+            topic: bapNetworkReciever
+```
+
+**Metrics Access**: 
+- Prometheus scraping: `http://your-server:9090/metrics` (default metrics port, configurable via `plugins.otelsetup.config.metricsPort`)
+
+### 4. Production BAP-Only Mode
+
+**File**: `config/onix-bap/adapter.yaml`
+
+**Characteristics**:
+- Only BAP modules (bapTxnReceiver, bapTxnCaller)
+- Dedicated BAP deployment
+- Production infrastructure
+
+**Use Case**: Separate BAP service for scalability
+
+### 5. Production BPP-Only Mode
+
+**File**: `config/onix-bpp/adapter.yaml`
+
+**Characteristics**:
+- Only BPP modules (bppTxnReceiver, bppTxnCaller)
+- Dedicated BPP deployment
+- Production infrastructure
+
+**Use Case**: Separate BPP service for scalability
+
+---
+
+## Configuration Examples
+
+### Complete BAP Receiver Configuration
+
+```yaml
+appName: "onix-bap"
+log:
+  level: info
+  destinations:
+    - type: stdout
+  contextKeys:
+    - transaction_id
+    - message_id
+    - subscriber_id
+
+http:
+  port: 8080
+  timeout:
+    read: 30
+    write: 30
+    idle: 30
+
+pluginManager:
+  root: /app/plugins
+
+modules:
+  - name: bapTxnReceiver
+    path: /bap/receiver/
+    handler:
+      type: std
+      role: bap
+      httpClientConfig:
+        maxIdleConns: 1000
+        maxIdleConnsPerHost: 200
+        idleConnTimeout: 300

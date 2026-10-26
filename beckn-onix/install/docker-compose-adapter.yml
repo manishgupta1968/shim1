@@ -1,0 +1,59 @@
+services:
+  # ============================================
+  # Core Infrastructure Services
+  # ============================================
+  
+  # Redis - Caching Service
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - beckn_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  
+  onix-adapter:
+    image: fidedocker/onix-adapter
+    container_name: onix-adapter
+    platform: linux/amd64
+    networks:
+      - beckn_network
+    ports:
+      - "8081:8081"
+    environment:
+      CONFIG_FILE: "/app/config/local-simple.yaml"
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      REDIS_ADDR: redis:6379
+      RABBITMQ_ADDR: rabbitmq:5672
+      RABBITMQ_USER: admin
+      RABBITMQ_PASS: admin123
+    volumes:
+      - ../config:/app/config
+      - ../schemas:/app/schemas
+    command: ["./server", "--config=/app/config/local-simple.yaml"]
+
+  # Vault - Key Management Service
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: server -dev -dev-root-token-id=root
+    networks:
+      - beckn_network
+
+networks:
+  beckn_network:
+    name: beckn_network
+    driver: bridge

@@ -1,0 +1,24 @@
+mappings:
+  search:
+    bapMappings: |
+      {
+        "context": $.context,
+        "message": {
+          "filters": {
+            "pickup": $.message.intent.fulfillment.start.location,
+            "drop": $.message.intent.fulfillment.end.location
+          }
+        }
+      }
+    bppMappings: |
+      {
+        "context": $.context,
+        "message": $.message
+      }
+  # Always fails evaluation with a real D3030 error, for testing the T*/D*
+  # classification against the actual engine.
+  jsonata_dynamic_error:
+    bapMappings: |
+      $number("not-a-number")
+    bppMappings: |
+      $number("not-a-number")

@@ -1,0 +1,614 @@
+package model
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"gopkg.in/yaml.v2"
+)
+
+// NewSignValidationErrf creates a sign-validation CodedErr with a formatted error message.
+func NewSignValidationErrf(format string, a ...any) *CodedErr {
+	return NewSignValidationErr(defaultSignValidationCode, fmt.Errorf(format, a...))
+}
+
+// NewNotFoundErrf creates a not-found CodedErr with a formatted error message.
+func NewNotFoundErrf(format string, a ...any) *CodedErr {
+	return NewNotFoundErr("", fmt.Errorf(format, a...))
+}
+
+// NewBadReqErrf creates a bad-request CodedErr with a formatted error message.
+func NewBadReqErrf(format string, a ...any) *CodedErr {
+	return NewBadReqErr("", fmt.Errorf(format, a...))
+}
+
+func TestNewCodedError(t *testing.T) {
+	err := NewCodedError("SCH_INVALID_ENUM", "value must be one of the allowed options")
+	if err.Code != "SCH_INVALID_ENUM" {
+		t.Errorf("Code = %s, want SCH_INVALID_ENUM", err.Code)
+	}
+	if err.Message != "value must be one of the allowed options" {
+		t.Errorf("Message = %s, want %s", err.Message, "value must be one of the allowed options")
+	}
+	if err.Details != nil {
+		t.Errorf("Details = %+v, want nil", err.Details)
+	}
+}
+
+func TestError_Error(t *testing.T) {
+	err := &Error{
+		Code:    "404",
+		Message: "User not found",
+		Details: &ErrorDetails{Path: "/api/v1/user"},
+	}
+
+	expected := "Error: Code=404, Path=/api/v1/user, Message=User not found"
+	actual := err.Error()
+
+	if actual != expected {
+		t.Errorf("err.Error() = %s, want %s",
+			actual, expected)
+	}
+
+}
+
+func TestSchemaValidationErr_Error(t *testing.T) {
+	schemaErr := &SchemaValidationErr{
+		Errors: []Error{
+			{Details: &ErrorDetails{Path: "/user"}, Message: "Field required"},
+			{Details: &ErrorDetails{Path: "/email"}, Message: "Invalid format"},
+		},
+	}
+
+	expected := "/user: Field required; /email: Invalid format"
+	actual := schemaErr.Error()
+
+	if actual != expected {
+		t.Errorf("err.Error() = %s, want %s",
+			actual, expected)
+	}
+}
+
+func TestSchemaValidationErr_BecknError(t *testing.T) {
+	schemaErr := &SchemaValidationErr{
+		Errors: []Error{
+			{Details: &ErrorDetails{Path: "/user"}, Message: "Field required"},
+		},
+	}
+
+	beErr := schemaErr.BecknError()
+	expected := "SCH_INVALID_FORMAT"
+	if beErr.Code != expected {
+		t.Errorf("err.Error() = %s, want %s",
+			beErr.Code, expected)
+	}
+	if beErr.Details == nil || beErr.Details.Path != "/user" {
+		t.Errorf("beErr.Details = %+v, want Path=/user", beErr.Details)
+	}
+}
+
+func TestSchemaValidationErr_BecknError_NoPaths(t *testing.T) {
+	schemaErr := &SchemaValidationErr{
+		Errors: []Error{
+			{Message: "generic error one"},
+			{Message: "generic error two"},
+		},
+	}
+
+	beErr := schemaErr.BecknError()
+	if beErr.Details != nil {
+		t.Errorf("beErr.Details = %+v, want nil when no entry has a path", beErr.Details)
+	}
+	expectedMsg := "generic error one; generic error two"
+	if beErr.Message != expectedMsg {
+		t.Errorf("beErr.Message = %s, want %s", beErr.Message, expectedMsg)
+	}
+}
+
+func TestSchemaValidationErr_BecknError_MixedPaths(t *testing.T) {
+	schemaErr := &SchemaValidationErr{
+		Errors: []Error{
+			{Details: &ErrorDetails{Path: "/a"}, Message: "m1"},
+			{Message: "m2"},
+			{Details: &ErrorDetails{Path: "/c"}, Message: "m3"},
+		},
+	}
+
+	beErr := schemaErr.BecknError()
+	if beErr.Details == nil {
+		t.Fatal("beErr.Details = nil, want non-nil since at least one entry has a path")
+	}
+	expectedPath := "/a;;/c"
+	if beErr.Details.Path != expectedPath {
+		t.Errorf("beErr.Details.Path = %s, want %s (positionally aligned with Message)", beErr.Details.Path, expectedPath)
+	}
+	expectedMsg := "m1; m2; m3"
+	if beErr.Message != expectedMsg {
+		t.Errorf("beErr.Message = %s, want %s", beErr.Message, expectedMsg)
+	}
+}
+
+func TestSchemaValidationErr_BecknError_CodeFromFirstNonEmpty(t *testing.T) {
+	tests := []struct {
+		name string
+		errs []Error
+		want string
+	}{
+		{
+			name: "first entry's code wins over a later different code",
+			errs: []Error{
+				{Code: "SCH_REQUIRED_FIELD_MISSING", Message: "m1"},
+				{Code: "SCH_INVALID_ENUM", Message: "m2"},
+			},
+			want: "SCH_REQUIRED_FIELD_MISSING",
+		},
+		{
+			name: "leading entries with no code are skipped",
+			errs: []Error{
+				{Message: "m1"},
+				{Code: "SCH_INVALID_ENUM", Message: "m2"},
+			},
+			want: "SCH_INVALID_ENUM",
+		},
+		{
+			name: "no entry has a code falls back to the default",
+			errs: []Error{
+				{Message: "m1"},
+				{Message: "m2"},
+			},
+			want: "SCH_INVALID_FORMAT",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			schemaErr := &SchemaValidationErr{Errors: tt.errs}
+			beErr := schemaErr.BecknError()
+			if beErr.Code != tt.want {
+				t.Errorf("Code = %s, want %s", beErr.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestFirstNonEmptyCode(t *testing.T) {
+	tests := []struct {
+		name        string
+		errs        []Error
+		defaultCode string
+		want        string
+	}{
+		{
+			name:        "first non-empty code wins",
+			errs:        []Error{{Message: "m1"}, {Code: "POL_KYC_REQUIRED", Message: "m2"}, {Code: "POL_GEO_RESTRICTED", Message: "m3"}},
+			defaultCode: "POL_GENERIC_ERROR",
+			want:        "POL_KYC_REQUIRED",
+		},
+		{
+			name:        "no entry has a code falls back to default",
+			errs:        []Error{{Message: "m1"}, {Message: "m2"}},
+			defaultCode: "POL_GENERIC_ERROR",
+			want:        "POL_GENERIC_ERROR",
+		},
+		{
+			name:        "empty slice falls back to default",
+			errs:        nil,
+			defaultCode: "POL_GENERIC_ERROR",
+			want:        "POL_GENERIC_ERROR",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := FirstNonEmptyCode(tt.errs, tt.defaultCode); got != tt.want {
+				t.Errorf("FirstNonEmptyCode() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSignValidationErr_BecknError(t *testing.T) {
+	signErr := NewSignValidationErr("", errors.New("signature failed"))
+	beErr := signErr.BecknError()
+
+	expectedMsg := "Signature Validation Error: signature failed"
+	if beErr.Message != expectedMsg {
+		t.Errorf("err.Error() = %s, want %s",
+			beErr.Message, expectedMsg)
+	}
+	if beErr.Code != "AUT_SIGNATURE_INVALID" {
+		t.Errorf("beErr.Code = %s, want AUT_SIGNATURE_INVALID (default classification)", beErr.Code)
+	}
+}
+
+func TestSignValidationErr_BecknError_WithExplicitCode(t *testing.T) {
+	signErr := NewSignValidationErr("AUT_SIGNATURE_MISSING", errors.New("signature missing in header"))
+	beErr := signErr.BecknError()
+
+	if beErr.Code != "AUT_SIGNATURE_MISSING" {
+		t.Errorf("beErr.Code = %s, want AUT_SIGNATURE_MISSING", beErr.Code)
+	}
+	expectedMsg := "Signature Validation Error: signature missing in header"
+	if beErr.Message != expectedMsg {
+		t.Errorf("beErr.Message = %s, want %s", beErr.Message, expectedMsg)
+	}
+}
+
+func TestSignValidationErr_Unwrap(t *testing.T) {
+	sentinel := errors.New("sentinel cause")
+	signErr := NewSignValidationErr("AUT_SUBSCRIBER_NOT_FOUND", sentinel)
+
+	if !errors.Is(signErr, sentinel) {
+		t.Errorf("errors.Is(signErr, sentinel) = false, want true via Unwrap()")
+	}
+
+	var target *CodedErr
+	wrapped := fmt.Errorf("wrapped: %w", signErr)
+	if !errors.As(wrapped, &target) {
+		t.Fatalf("errors.As(wrapped, &target) = false, want true")
+	}
+	if target.Code != "AUT_SUBSCRIBER_NOT_FOUND" {
+		t.Errorf("target.Code = %s, want AUT_SUBSCRIBER_NOT_FOUND", target.Code)
+	}
+	if target.HTTPStatus() != http.StatusUnauthorized {
+		t.Errorf("target.HTTPStatus() = %d, want %d (status must survive wrapping)", target.HTTPStatus(), http.StatusUnauthorized)
+	}
+}
+
+func TestResolveCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *CodedErr
+		want string
+	}{
+		{"explicit code wins", NewSignValidationErr("AUT_KEY_EXPIRED_OR_REVOKED", errors.New("boom")), "AUT_KEY_EXPIRED_OR_REVOKED"},
+		{"empty code falls back to the constructor default", NewSignValidationErr("", errors.New("boom")), defaultSignValidationCode},
+		{"empty code on the generic constructor falls back to the unclassified bucket", NewCodedErr(http.StatusBadGateway, "", errors.New("boom")), defaultUnclassifiedCode},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.resolveCode(); got != tt.want {
+				t.Errorf("resolveCode() = %s, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCodedErr_HTTPStatus pins the status each constructor assigns, the
+// mapping nackBecknError relies on.
+func TestCodedErr_HTTPStatus(t *testing.T) {
+	cause := errors.New("boom")
+	tests := []struct {
+		name string
+		err  *CodedErr
+		want int
+	}{
+		{"bad request", NewBadReqErr("", cause), http.StatusBadRequest},
+		{"sign validation", NewSignValidationErr("", cause), http.StatusUnauthorized},
+		{"not found", NewNotFoundErr("", cause), http.StatusNotFound},
+		{"explicit status", NewCodedErr(http.StatusServiceUnavailable, "NET_DOWNSTREAM_UNAVAILABLE", cause), http.StatusServiceUnavailable},
+		{"no status set falls back to 400", &CodedErr{error: cause}, http.StatusBadRequest},
+		{"a success status falls back to 400", NewCodedErr(http.StatusOK, "NET_INTERNAL_ERROR", cause), http.StatusBadRequest},
+		{"an out-of-range status falls back to 400", NewCodedErr(999, "NET_INTERNAL_ERROR", cause), http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.HTTPStatus(); got != tt.want {
+				t.Errorf("HTTPStatus() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCodedErr_NilCause covers a CodedErr with no wrapped cause, whether built
+// by a constructor or as a bare literal. It must return an empty message and still emit a code without panicking.
+func TestCodedErr_NilCause(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      *CodedErr
+		wantMsg  string
+		wantCode string
+	}{
+		{"constructor with a nil cause", NewBadReqErr("", nil), "BAD Request: ", defaultBadReqCode},
+		{"constructor with a nil cause and a code", NewSignValidationErr("AUT_SIGNATURE_MISSING", nil), "Signature Validation Error: ", "AUT_SIGNATURE_MISSING"},
+		{"bare literal", &CodedErr{}, "", defaultUnclassifiedCode},
+		{"bare literal with only a code", &CodedErr{Code: "POL_GENERIC_ERROR"}, "", "POL_GENERIC_ERROR"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.Error(); got != "" {
+				t.Errorf("Error() = %q, want empty for a nil cause", got)
+			}
+			beErr := tt.err.BecknError()
+			if beErr.Message != tt.wantMsg {
+				t.Errorf("BecknError().Message = %q, want %q", beErr.Message, tt.wantMsg)
+			}
+			if beErr.Code != tt.wantCode {
+				t.Errorf("BecknError().Code = %s, want %s", beErr.Code, tt.wantCode)
+			}
+		})
+	}
+}
+
+// TestNewCodedErr_BecknError checks that the caller's code is reported
+// verbatim and that no message prefix is prepended.
+func TestNewCodedErr_BecknError(t *testing.T) {
+	err := NewCodedErr(http.StatusGatewayTimeout, "NET_TIMEOUT", errors.New("registry lookup timed out"))
+	beErr := err.BecknError()
+
+	if beErr.Code != "NET_TIMEOUT" {
+		t.Errorf("beErr.Code = %s, want NET_TIMEOUT", beErr.Code)
+	}
+	if beErr.Message != "registry lookup timed out" {
+		t.Errorf("beErr.Message = %s, want the cause's text with no prefix", beErr.Message)
+	}
+	if err.HTTPStatus() != http.StatusGatewayTimeout {
+		t.Errorf("HTTPStatus() = %d, want %d", err.HTTPStatus(), http.StatusGatewayTimeout)
+	}
+}
+
+func TestNewSignValidationErrf(t *testing.T) {
+	signErr := NewSignValidationErrf("error %s", "signature failed")
+	expected := "error signature failed"
+	if signErr.Error() != expected {
+		t.Errorf("err.Error() = %s, want %s",
+			signErr.Error(), expected)
+	}
+}
+
+func TestNewSignValidationErr(t *testing.T) {
+	err := errors.New("signature error")
+	signErr := NewSignValidationErr("", err)
+
+	if signErr.Error() != err.Error() {
+		t.Errorf("err.Error() = %s, want %s", err.Error(),
+			signErr.Error())
+	}
+}
+
+func TestBadReqErr_BecknError(t *testing.T) {
+	badReqErr := NewBadReqErr("", errors.New("invalid input"))
+	beErr := badReqErr.BecknError()
+
+	expectedMsg := "BAD Request: invalid input"
+	if beErr.Message != expectedMsg {
+		t.Errorf("err.Error() = %s, want %s",
+			beErr.Message, expectedMsg)
+	}
+	if beErr.Code != "SCH_INVALID_FORMAT" {
+		t.Errorf("beErr.Code = %s, want the SCH_INVALID_FORMAT default unchanged for NewBadReqErr callers", beErr.Code)
+	}
+}
+
+func TestBadReqErr_BecknError_WithExplicitCode(t *testing.T) {
+	badReqErr := NewBadReqErr("POL_GEO_RESTRICTED", errors.New("delivery not offered in this region"))
+	beErr := badReqErr.BecknError()
+
+	if beErr.Code != "POL_GEO_RESTRICTED" {
+		t.Errorf("beErr.Code = %s, want POL_GEO_RESTRICTED", beErr.Code)
+	}
+	expectedMsg := "BAD Request: delivery not offered in this region"
+	if beErr.Message != expectedMsg {
+		t.Errorf("beErr.Message = %s, want %s", beErr.Message, expectedMsg)
+	}
+}
+
+func TestBadReqErr_Unwrap(t *testing.T) {
+	sentinel := errors.New("sentinel cause")
+	badReqErr := NewBadReqErr("POL_GENERIC_ERROR", sentinel)
+
+	if !errors.Is(badReqErr, sentinel) {
+		t.Errorf("errors.Is(badReqErr, sentinel) = false, want true via Unwrap()")
+	}
+}
+
+func TestNewBadReqErrf(t *testing.T) {
+	badReqErr := NewBadReqErrf("invalid field %s", "name")
+	expected := "invalid field name"
+	if badReqErr.Error() != expected {
+		t.Errorf("err.Error() = %s, want %s",
+			badReqErr, expected)
+	}
+}
+
+func TestNewBadReqErr(t *testing.T) {
+	err := errors.New("bad request")
+	badReqErr := NewBadReqErr("", err)
+
+	if badReqErr.Error() != err.Error() {
+		t.Errorf("err.Error() = %s, want %s",
+			badReqErr.Error(), err.Error())
+	}
+
+}
+
+func TestNotFoundErr_BecknError(t *testing.T) {
+	notFoundErr := NewNotFoundErr("", errors.New("resource not found"))
+	beErr := notFoundErr.BecknError()
+
+	expectedMsg := "Endpoint not found: resource not found"
+	if beErr.Message != expectedMsg {
+		t.Errorf("err.Error() = %s, want %s",
+			beErr.Message, expectedMsg)
+	}
+	if beErr.Code != "NET_ENTITY_NOT_FOUND" {
+		t.Errorf("beErr.Code = %s, want NET_ENTITY_NOT_FOUND (default classification)", beErr.Code)
+	}
+}
+
+func TestNotFoundErr_BecknError_WithExplicitCode(t *testing.T) {
+	notFoundErr := NewNotFoundErr("NET_ENTITY_NOT_FOUND", errors.New("subscriber not registered"))
+	beErr := notFoundErr.BecknError()
+
+	if beErr.Code != "NET_ENTITY_NOT_FOUND" {
+		t.Errorf("beErr.Code = %s, want NET_ENTITY_NOT_FOUND", beErr.Code)
+	}
+	expectedMsg := "Endpoint not found: subscriber not registered"
+	if beErr.Message != expectedMsg {
+		t.Errorf("beErr.Message = %s, want %s", beErr.Message, expectedMsg)
+	}
+}
+
+func TestNotFoundErr_Unwrap(t *testing.T) {
+	sentinel := errors.New("sentinel cause")
+	notFoundErr := NewNotFoundErr("NET_ENTITY_NOT_FOUND", sentinel)
+
+	if !errors.Is(notFoundErr, sentinel) {
+		t.Errorf("errors.Is(notFoundErr, sentinel) = false, want true via Unwrap()")
+	}
+}
+
+func TestNewNotFoundErrf(t *testing.T) {
+	notFoundErr := NewNotFoundErrf("resource %s not found", "user")
+	expected := "resource user not found"
+	if notFoundErr.Error() != expected {
+		t.Errorf("err.Error() = %s, want %s",
+			notFoundErr.Error(), expected)
+	}
+}
+
+func TestNewNotFoundErr(t *testing.T) {
+	err := errors.New("not found")
+	notFoundErr := NewNotFoundErr("", err)
+
+	if notFoundErr.Error() != err.Error() {
+		t.Errorf("err.Error() = %s, want %s",
+			notFoundErr.Error(), err.Error())
+	}
+}
+
+func TestRole_UnmarshalYAML_ValidRole(t *testing.T) {
+	var role Role
+	yamlData := []byte("bap")
+
+	err := yaml.Unmarshal(yamlData, &role)
+	assert.NoError(t, err) //TODO: should replace assert here
+	assert.Equal(t, RoleBAP, role)
+}
+
+func TestRole_UnmarshalYAML_InvalidRole(t *testing.T) {
+	var role Role
+	yamlData := []byte("invalid")
+
+	err := yaml.Unmarshal(yamlData, &role)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid Role")
+}
+
+func TestSchemaValidationErr_BecknError_NoErrors(t *testing.T) {
+	schemaValidationErr := &SchemaValidationErr{Errors: nil}
+	beErr := schemaValidationErr.BecknError()
+
+	expectedMsg := "Schema validation error."
+	expectedCode := "SCH_INVALID_FORMAT"
+
+	if beErr.Message != expectedMsg {
+		t.Errorf("beErr.Message = %s, want %s", beErr.Message, expectedMsg)
+	}
+	if beErr.Code != expectedCode {
+		t.Errorf("beErr.Code = %s, want %s", beErr.Code, expectedCode)
+	}
+}
+
+func TestNewAckNoCallbackErr(t *testing.T) {
+	tests := []struct {
+		name           string
+		status         Status
+		becknErr       *Error
+		wantErrContain string
+	}{
+		{
+			name:           "ACK status",
+			status:         StatusACK,
+			becknErr:       &Error{Code: "NO_CATALOG", Message: "no matching catalog"},
+			wantErrContain: "AckNoCallback(status=ACK)",
+		},
+		{
+			name:           "NACK status",
+			status:         StatusNACK,
+			becknErr:       &Error{Code: "PROVIDER_CLOSED", Message: "provider closed"},
+			wantErrContain: "AckNoCallback(status=NACK)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := NewAckNoCallbackErr(tt.status, tt.becknErr)
+
+			if e.Status != tt.status {
+				t.Errorf("Status = %s, want %s", e.Status, tt.status)
+			}
+			if e.BecknError() != tt.becknErr {
+				t.Error("BecknError() did not return the wrapped error")
+			}
+			if got := e.Error(); !strings.Contains(got, tt.wantErrContain) {
+				t.Errorf("Error() = %q, want it to contain %q", got, tt.wantErrContain)
+			}
+		})
+	}
+}
+
+func TestNewAckNoCallbackErr_NilErr_Panics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for nil Err, got none")
+		}
+	}()
+	NewAckNoCallbackErr(StatusACK, nil)
+}
+
+func TestParseContextKey_ValidKeys(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected ContextKey
+	}{
+		{"transaction_id", ContextKeyTxnID},
+		{"message_id", ContextKeyMsgID},
+		{"subscriber_id", ContextKeySubscriberID},
+		{"module_id", ContextKeyModuleID},
+		{"parent_id", ContextKeyParentID},
+	}
+
+	for _, tt := range tests {
+		key, err := ParseContextKey(tt.input)
+		if err != nil {
+			t.Errorf("unexpected error for input %s: %v", tt.input, err)
+		}
+		if key != tt.expected {
+			t.Errorf("expected %s, got %s", tt.expected, key)
+		}
+	}
+}
+
+func TestParseContextKey_InvalidKey(t *testing.T) {
+	_, err := ParseContextKey("invalid_key")
+	if err == nil {
+		t.Error("expected error for invalid context key, got nil")
+	}
+}
+
+func TestContextKey_UnmarshalYAML_Valid(t *testing.T) {
+	yamlData := []byte("message_id")
+	var key ContextKey
+
+	err := yaml.Unmarshal(yamlData, &key)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if key != ContextKeyMsgID {
+		t.Errorf("expected %s, got %s", ContextKeyMsgID, key)
+	}
+}
+
+func TestContextKey_UnmarshalYAML_Invalid(t *testing.T) {
+	yamlData := []byte("invalid_key")
+	var key ContextKey
+
+	err := yaml.Unmarshal(yamlData, &key)
+	if err == nil {
+		t.Error("expected error for invalid context key, got nil")
+	}
+}

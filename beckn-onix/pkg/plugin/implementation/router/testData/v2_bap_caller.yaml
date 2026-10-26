@@ -1,0 +1,15 @@
+routingRules:
+  - version: 2.0.0
+    targetType: bpp
+    target:
+      url: https://gateway.example.com
+    endpoints:
+      - search
+  - version: 2.0.0
+    targetType: bpp
+    endpoints:
+      - select
+      - init
+      - confirm
+      - status
+      - cancel

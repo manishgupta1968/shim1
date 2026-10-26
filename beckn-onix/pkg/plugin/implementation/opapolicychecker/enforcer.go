@@ -1,0 +1,781 @@
+package opapolicychecker
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/beckn-one/beckn-onix/pkg/log"
+	"github.com/beckn-one/beckn-onix/pkg/model"
+	"github.com/beckn-one/beckn-onix/pkg/plugin/definition"
+	"gopkg.in/yaml.v3"
+)
+
+// Config holds the configuration for the OPA Policy Checker plugin.
+type Config struct {
+	NetworkPolicyConfig string
+	RefreshInterval     time.Duration // 0 = disabled
+	Enabled             bool
+	DebugLogging        bool
+	RuntimeConfig       map[string]string
+}
+
+type PolicyConfig struct {
+	Type          string
+	Location      string
+	PolicyPaths   []string
+	Query         string
+	Enabled       bool
+	FetchTimeout  time.Duration
+	IsBundle      bool
+	Verification  *ArtifactVerificationConfig
+	RuntimeConfig map[string]string
+}
+
+const (
+	policyTypeFile     = "file"
+	policyTypeDir      = "dir"
+	policyTypeBundle   = "bundle"
+	policyTypeManifest = "manifest"
+)
+
+var knownKeys = map[string]bool{
+	"networkPolicyConfig": true,
+	"enabled":             true,
+	"debugLogging":        true,
+	"refreshInterval":     true,
+}
+
+// policyEntryKnownKeys is matched against the post-flattening key shape produced
+// by loadNetworkPolicies, so nested YAML like verification.publicKeyLookupUrl is
+// validated here using dot-notation.
+var policyEntryKnownKeys = map[string]bool{
+	"type":                            true,
+	"location":                        true,
+	"query":                           true,
+	"enabled":                         true,
+	"fetchTimeoutSeconds":             true,
+	"verification.enabled":            true,
+	"verification.publicKeyLookupUrl": true,
+	"verification.signatureLocation":  true,
+	"verification.algorithm":          true,
+}
+
+func DefaultConfig() *Config {
+	return &Config{
+		Enabled:       true,
+		RuntimeConfig: make(map[string]string),
+	}
+}
+
+func defaultPolicyConfig() *PolicyConfig {
+	return &PolicyConfig{
+		Enabled:       true,
+		FetchTimeout:  defaultPolicyFetchTimeout,
+		RuntimeConfig: make(map[string]string),
+	}
+}
+
+// ParseConfig parses the top-level plugin configuration map into a Config struct.
+func ParseConfig(cfg map[string]string) (*Config, error) {
+	config := DefaultConfig()
+
+	npc, ok := cfg["networkPolicyConfig"]
+	if !ok || strings.TrimSpace(npc) == "" {
+		return nil, fmt.Errorf("'networkPolicyConfig' is required")
+	}
+	config.NetworkPolicyConfig = npc
+
+	if enabled, ok := cfg["enabled"]; ok {
+		config.Enabled = enabled == "true" || enabled == "1"
+	}
+
+	if debug, ok := cfg["debugLogging"]; ok {
+		config.DebugLogging = debug == "true" || debug == "1"
+	}
+
+	if interval, ok := cfg["refreshInterval"]; ok && interval != "" {
+		dur, err := time.ParseDuration(interval)
+		if err != nil || dur < 0 {
+			return nil, fmt.Errorf("'refreshInterval' must be a valid non-negative duration, got %q", interval)
+		}
+		config.RefreshInterval = dur
+	}
+
+	for k, v := range cfg {
+		if !knownKeys[k] {
+			config.RuntimeConfig[k] = v
+		}
+	}
+
+	return config, nil
+}
+
+func parsePolicyConfig(cfg map[string]string) (*PolicyConfig, error) {
+	config := defaultPolicyConfig()
+
+	typ, hasType := cfg["type"]
+	if !hasType || typ == "" {
+		return nil, fmt.Errorf("'type' is required (%s, %s, %s, or %s)", policyTypeFile, policyTypeDir, policyTypeBundle, policyTypeManifest)
+	}
+	config.Type = typ
+
+	switch typ {
+	case policyTypeFile:
+		location, hasLoc := cfg["location"]
+		if !hasLoc || location == "" {
+			return nil, fmt.Errorf("'location' is required")
+		}
+		config.Location = location
+		config.PolicyPaths = append(config.PolicyPaths, location)
+	case policyTypeDir:
+		location, hasLoc := cfg["location"]
+		if !hasLoc || location == "" {
+			return nil, fmt.Errorf("'location' is required")
+		}
+		config.Location = location
+		config.PolicyPaths = append(config.PolicyPaths, location)
+	case policyTypeBundle:
+		location, hasLoc := cfg["location"]
+		if !hasLoc || location == "" {
+			return nil, fmt.Errorf("'location' is required")
+		}
+		config.Location = location
+		config.IsBundle = true
+		config.PolicyPaths = append(config.PolicyPaths, location)
+	case policyTypeManifest:
+		if location := strings.TrimSpace(cfg["location"]); location != "" {
+			return nil, fmt.Errorf("'location' must not be set for type=%s", policyTypeManifest)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported type %q (expected: %s, %s, %s, or %s)", typ, policyTypeFile, policyTypeDir, policyTypeBundle, policyTypeManifest)
+	}
+
+	if typ != policyTypeManifest {
+		query, hasQuery := cfg["query"]
+		if !hasQuery || query == "" {
+			return nil, fmt.Errorf("'query' is required (e.g., data.policy.violations)")
+		}
+		config.Query = query
+	} else if query := strings.TrimSpace(cfg["query"]); query != "" {
+		return nil, fmt.Errorf("'query' must not be set for type=%s", policyTypeManifest)
+	}
+
+
+	if enabled, ok := cfg["enabled"]; ok {
+		config.Enabled = enabled == "true" || enabled == "1"
+	}
+
+	if fts, ok := cfg["fetchTimeoutSeconds"]; ok && fts != "" {
+		secs, err := strconv.Atoi(fts)
+		if err != nil || secs <= 0 {
+			return nil, fmt.Errorf("'fetchTimeoutSeconds' must be a positive integer, got %q", fts)
+		}
+		config.FetchTimeout = time.Duration(secs) * time.Second
+	}
+
+	if verificationEnabled, ok := cfg["verification.enabled"]; ok && verificationEnabled != "" {
+		if config.Type == policyTypeManifest {
+			return nil, fmt.Errorf("verification must not be configured for type=%s; manifest verification is handled by the manifest loader", policyTypeManifest)
+		}
+		enabled, err := strconv.ParseBool(verificationEnabled)
+		if err != nil {
+			return nil, fmt.Errorf("'verification.enabled' must be a boolean, got %q", verificationEnabled)
+		}
+		if enabled {
+			config.Verification = &ArtifactVerificationConfig{
+				Enabled:            true,
+				PublicKeyLookupURL: strings.TrimSpace(cfg["verification.publicKeyLookupUrl"]),
+				SignatureLocation:  strings.TrimSpace(cfg["verification.signatureLocation"]),
+				Algorithm:          strings.TrimSpace(cfg["verification.algorithm"]),
+			}
+			if config.Verification.Algorithm == "" {
+				config.Verification.Algorithm = defaultBundleVerificationAlgorithm
+			}
+
+			if config.Verification.PublicKeyLookupURL == "" {
+				return nil, fmt.Errorf("'verification.publicKeyLookupUrl' is required when verification.enabled=true")
+			}
+
+			switch config.Type {
+			case policyTypeBundle:
+				if config.Verification.SignatureLocation != "" {
+					return nil, fmt.Errorf("'verification.signatureLocation' must not be set for type=%s; bundle signatures are read from inside the bundle", policyTypeBundle)
+				}
+			case policyTypeDir:
+				return nil, fmt.Errorf("verification is not supported for type=%s; package the directory as a signed bundle instead", policyTypeDir)
+			case policyTypeFile:
+				if config.Verification.SignatureLocation == "" {
+					return nil, fmt.Errorf("'verification.signatureLocation' is required when verification.enabled=true for type=%s", config.Type)
+				}
+			}
+		}
+	}
+
+	for k, v := range cfg {
+		if !policyEntryKnownKeys[k] {
+			config.RuntimeConfig[k] = v
+		}
+	}
+
+	return config, nil
+}
+
+
+type loadedPolicy struct {
+	name                   string
+	config                 *PolicyConfig
+	evaluator              *Evaluator
+	sourceType             string
+	manifestDeclaredSigned *bool
+	manifestVerified       bool
+}
+
+type resolvedManifestPolicy struct {
+	config         *PolicyConfig
+	declaredSigned *bool
+	verified       bool
+}
+
+type networkPolicyFile struct {
+	NetworkPolicies map[string]map[string]interface{} `yaml:"networkPolicies"`
+}
+
+// PolicyEnforcer evaluates beckn messages against OPA policies and NACKs non-compliant messages.
+type PolicyEnforcer struct {
+	config         *Config
+	manifestLoader definition.ManifestLoader
+	policies       map[string]*loadedPolicy
+	defaultPolicy  *loadedPolicy
+	evaluatorMu    sync.RWMutex
+	closeOnce      sync.Once
+	done           chan struct{}
+}
+
+func loadNetworkPolicies(configPath string) (map[string]map[string]string, error) {
+	if configPath == "" {
+		return nil, fmt.Errorf("networkPolicyConfig path is empty")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading network policy config file at %s: %w", configPath, err)
+	}
+
+	var file networkPolicyFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return nil, fmt.Errorf("error parsing network policy config YAML: %w", err)
+	}
+	if len(file.NetworkPolicies) == 0 {
+		return nil, fmt.Errorf("networkPolicies must contain at least one entry")
+	}
+
+	policies := make(map[string]map[string]string, len(file.NetworkPolicies))
+	for policyName, rawCfg := range file.NetworkPolicies {
+		if strings.TrimSpace(policyName) == "" {
+			return nil, fmt.Errorf("network policy key cannot be empty")
+		}
+		if rawCfg == nil {
+			return nil, fmt.Errorf("network policy %q config cannot be empty", policyName)
+		}
+
+		cfg := make(map[string]string, len(rawCfg))
+		for k, v := range rawCfg {
+			switch typed := v.(type) {
+			case string:
+				cfg[k] = typed
+			case bool:
+				cfg[k] = strconv.FormatBool(typed)
+			case int:
+				cfg[k] = strconv.Itoa(typed)
+			case int64:
+				cfg[k] = strconv.FormatInt(typed, 10)
+			case float64:
+				cfg[k] = strconv.FormatFloat(typed, 'f', -1, 64)
+			case map[string]interface{}:
+				if k != "verification" {
+					return nil, fmt.Errorf("network policy %q field %q must be a scalar value", policyName, k)
+				}
+				for subKey, subValue := range typed {
+					flatKey := "verification." + subKey
+					switch subTyped := subValue.(type) {
+					case string:
+						cfg[flatKey] = subTyped
+					case bool:
+						cfg[flatKey] = strconv.FormatBool(subTyped)
+					case int:
+						cfg[flatKey] = strconv.Itoa(subTyped)
+					case int64:
+						cfg[flatKey] = strconv.FormatInt(subTyped, 10)
+					case float64:
+						cfg[flatKey] = strconv.FormatFloat(subTyped, 'f', -1, 64)
+					case nil:
+						return nil, fmt.Errorf("network policy %q field %q cannot be null", policyName, flatKey)
+					default:
+						return nil, fmt.Errorf("network policy %q field %q must be a scalar value", policyName, flatKey)
+					}
+				}
+			case nil:
+				return nil, fmt.Errorf("network policy %q field %q cannot be null", policyName, k)
+			default:
+				return nil, fmt.Errorf("network policy %q field %q must be a scalar value", policyName, k)
+			}
+		}
+		policies[policyName] = cfg
+	}
+
+	return policies, nil
+}
+
+func mergeRuntimeConfig(base map[string]string, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+
+	merged := make(map[string]string, len(base)+len(override))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range override {
+		merged[k] = v
+	}
+	return merged
+}
+
+func resolveManifestPolicyConfig(ctx context.Context, policyName string, baseConfig *PolicyConfig, manifestLoader definition.ManifestLoader) (*resolvedManifestPolicy, error) {
+	if policyName == "default" {
+		return nil, fmt.Errorf("default policy cannot use type=%s", policyTypeManifest)
+	}
+	if manifestLoader == nil {
+		return nil, fmt.Errorf("type=%s requires ManifestLoader plugin to be configured", policyTypeManifest)
+	}
+
+	// OPA refresh re-resolves manifest-backed policies, but ManifestLoader owns
+	// manifest freshness. A newer manifest is fetched only when its cache entry
+	// is expired, bypassed, or disabled by manifestloader configuration.
+	doc, err := manifestLoader.GetByNetworkID(ctx, policyName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load manifest for network %q: %w", policyName, err)
+	}
+
+	networkManifest, err := model.ParseNetworkManifest(doc.Content)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse manifest YAML for network %q: %w", policyName, err)
+	}
+
+	now := time.Now().UTC()
+	if err := networkManifest.Validate(policyName, now); err != nil {
+		return nil, err
+	}
+
+	resolved := *baseConfig
+	resolved.RuntimeConfig = mergeRuntimeConfig(nil, baseConfig.RuntimeConfig)
+	resolved.Type = networkManifest.Policies.Source
+	resolved.IsBundle = networkManifest.Policies.Source == model.PolicySourceBundle
+	resolved.PolicyPaths = nil
+	resolved.Location = ""
+	resolved.Query = ""
+	resolved.Verification = nil
+
+	switch networkManifest.Policies.Source {
+	case model.PolicySourceBundle:
+		resolved.Location = networkManifest.Policies.Bundle.URL
+		resolved.PolicyPaths = []string{networkManifest.Policies.Bundle.URL}
+		resolved.Query = networkManifest.Policies.Bundle.PolicyQueryPath
+		if networkManifest.Policies.Bundle.Signed {
+			resolved.Verification = &ArtifactVerificationConfig{
+				Enabled:            true,
+				PublicKeyLookupURL: networkManifest.Policies.Bundle.SigningPublicKeyLookupURL,
+				Algorithm:          defaultBundleVerificationAlgorithm,
+			}
+		} else if strings.HasPrefix(networkManifest.Policies.Bundle.URL, "http://") {
+			log.Warnf(ctx, "OPAPolicyChecker: policy bundle for network %q uses cleartext HTTP and signing is disabled; a MITM can inject arbitrary Rego", policyName)
+		}
+	case model.PolicySourceFile:
+		resolved.Location = networkManifest.Policies.File.URL
+		resolved.PolicyPaths = []string{networkManifest.Policies.File.URL}
+		resolved.Query = networkManifest.Policies.File.PolicyQueryPath
+		if networkManifest.Policies.File.Signed {
+			resolved.Verification = &ArtifactVerificationConfig{
+				Enabled:            true,
+				PublicKeyLookupURL: networkManifest.Policies.File.SigningPublicKeyLookupURL,
+				SignatureLocation:  networkManifest.Policies.File.SignatureURL,
+			}
+		} else if strings.HasPrefix(networkManifest.Policies.File.URL, "http://") {
+			log.Warnf(ctx, "OPAPolicyChecker: policy file for network %q uses cleartext HTTP and signing is disabled; a MITM can inject arbitrary Rego", policyName)
+		}
+	default:
+		return nil, fmt.Errorf("manifest for network %q uses unsupported policies.source %q", policyName, networkManifest.Policies.Source)
+	}
+
+	return &resolvedManifestPolicy{
+		config:         &resolved,
+		declaredSigned: networkManifest.Governance.Signed,
+		verified:       doc.Verified,
+	}, nil
+}
+
+func loadPolicy(ctx context.Context, manifestLoader definition.ManifestLoader, policyName string, config *PolicyConfig, sharedRuntimeConfig map[string]string) (*loadedPolicy, error) {
+	policyConfig := *config
+	policyConfig.RuntimeConfig = mergeRuntimeConfig(sharedRuntimeConfig, config.RuntimeConfig)
+
+	loaded := &loadedPolicy{
+		name:       policyName,
+		config:     &policyConfig,
+		sourceType: config.Type,
+	}
+	if !policyConfig.Enabled {
+		return loaded, nil
+	}
+
+	if policyConfig.Type == policyTypeManifest {
+		resolvedManifest, err := resolveManifestPolicyConfig(ctx, policyName, &policyConfig, manifestLoader)
+		if err != nil {
+			return nil, err
+		}
+		policyConfig = *resolvedManifest.config
+		// Reapply shared runtime config on top of the manifest-resolved config so
+		// adapter-level values remain available under data.config.
+		policyConfig.RuntimeConfig = mergeRuntimeConfig(sharedRuntimeConfig, resolvedManifest.config.RuntimeConfig)
+		loaded.manifestDeclaredSigned = resolvedManifest.declaredSigned
+		loaded.manifestVerified = resolvedManifest.verified
+	}
+
+	loaded.config = &policyConfig
+
+	evaluator, err := NewEvaluator(
+		policyConfig.PolicyPaths,
+		policyConfig.Query,
+		policyConfig.RuntimeConfig,
+		policyConfig.IsBundle,
+		policyConfig.FetchTimeout,
+		policyConfig.Verification,
+	)
+	if err != nil {
+		return nil, err
+	}
+	loaded.evaluator = evaluator
+	return loaded, nil
+}
+
+func loadNetworkPoliciesForEnforcer(ctx context.Context, manifestLoader definition.ManifestLoader, config *Config) (map[string]*loadedPolicy, *loadedPolicy, error) {
+	rawPolicies, err := loadNetworkPolicies(config.NetworkPolicyConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	policies := make(map[string]*loadedPolicy, len(rawPolicies))
+	var defaultPolicy *loadedPolicy
+
+	for policyName, rawCfg := range rawPolicies {
+		policyCfg, err := parsePolicyConfig(rawCfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid network policy %q: %w", policyName, err)
+		}
+
+		loaded, err := loadPolicy(ctx, manifestLoader, policyName, policyCfg, config.RuntimeConfig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to initialize network policy %q: %w", policyName, err)
+		}
+
+		if policyName == "default" {
+			defaultPolicy = loaded
+		} else {
+			policies[policyName] = loaded
+		}
+	}
+
+	return policies, defaultPolicy, nil
+}
+
+func logLoadedPolicy(ctx context.Context, networkScoped bool, policy *loadedPolicy) {
+	if policy == nil || policy.config == nil {
+		return
+	}
+
+	moduleNames := []string{}
+	if policy.evaluator != nil {
+		moduleNames = policy.evaluator.ModuleNames()
+	}
+
+	if networkScoped {
+		if policy.sourceType == policyTypeManifest {
+			manifestSigned := "unknown"
+			if policy.manifestDeclaredSigned != nil {
+				manifestSigned = strconv.FormatBool(*policy.manifestDeclaredSigned)
+			}
+			log.Infof(ctx, "OPAPolicyChecker: loaded network policy networkID=%q sourceType=manifest resolvedType=%s manifestSigned=%s manifestVerified=%t location=%s query=%s enabled=%t modules=%v",
+				policy.name,
+				policy.config.Type,
+				manifestSigned,
+				policy.manifestVerified,
+				policy.config.Location,
+				policy.config.Query,
+				policy.config.Enabled,
+				moduleNames,
+			)
+			return
+		}
+		log.Infof(ctx, "OPAPolicyChecker: loaded network policy networkID=%q type=%s location=%s query=%s enabled=%t modules=%v",
+			policy.name,
+			policy.config.Type,
+			policy.config.Location,
+			policy.config.Query,
+			policy.config.Enabled,
+			moduleNames,
+		)
+		return
+	}
+
+	log.Infof(ctx, "OPAPolicyChecker: loaded default policy type=%s location=%s query=%s enabled=%t modules=%v",
+		policy.config.Type,
+		policy.config.Location,
+		policy.config.Query,
+		policy.config.Enabled,
+		moduleNames,
+	)
+}
+
+func New(ctx context.Context, cfg map[string]string) (*PolicyEnforcer, error) {
+	return NewWithManifestLoader(ctx, nil, cfg)
+}
+
+func NewWithManifestLoader(ctx context.Context, manifestLoader definition.ManifestLoader, cfg map[string]string) (*PolicyEnforcer, error) {
+	config, err := ParseConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("opapolicychecker: config error: %w", err)
+	}
+
+	enforcer := &PolicyEnforcer{
+		config:         config,
+		manifestLoader: manifestLoader,
+		done:           make(chan struct{}),
+	}
+
+	if !config.Enabled {
+		log.Warnf(ctx, "OPAPolicyChecker is disabled via config; policy enforcement will be skipped")
+		return enforcer, nil
+	}
+
+	enforcer.policies, enforcer.defaultPolicy, err = loadNetworkPoliciesForEnforcer(ctx, manifestLoader, config)
+	if err != nil {
+		return nil, fmt.Errorf("opapolicychecker: failed to initialize network policies: %w", err)
+	}
+
+	log.Infof(ctx, "OPAPolicyChecker initialized in network policy mode (policyConfig=%s, policies=%d, hasDefault=%t, refreshInterval=%s)",
+		config.NetworkPolicyConfig, len(enforcer.policies), enforcer.defaultPolicy != nil, config.RefreshInterval)
+	for _, policy := range enforcer.policies {
+		logLoadedPolicy(ctx, true, policy)
+	}
+	if enforcer.defaultPolicy != nil {
+		logLoadedPolicy(ctx, false, enforcer.defaultPolicy)
+	}
+
+	if config.RefreshInterval > 0 {
+		go enforcer.refreshLoop(ctx)
+	}
+
+	return enforcer, nil
+}
+
+// refreshLoop periodically reloads and recompiles OPA policies.
+// Follows the schemav2validator pattern: driven by context cancellation.
+func (e *PolicyEnforcer) refreshLoop(ctx context.Context) {
+	ticker := time.NewTicker(e.config.RefreshInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Infof(ctx, "OPAPolicyChecker: refresh loop stopped")
+			return
+		case <-e.done:
+			log.Infof(ctx, "OPAPolicyChecker: refresh loop stopped by Close()")
+			return
+		case <-ticker.C:
+			e.reloadPolicies(ctx)
+		}
+	}
+}
+
+// reloadPolicies reloads and recompiles all policies, atomically swapping the evaluator.
+// Reload failures are non-fatal; the old evaluator stays active.
+func (e *PolicyEnforcer) reloadPolicies(ctx context.Context) {
+	e.reloadNetworkPolicies(ctx)
+}
+
+func (e *PolicyEnforcer) reloadNetworkPolicies(ctx context.Context) {
+	start := time.Now()
+
+	policies, defaultPolicy, err := loadNetworkPoliciesForEnforcer(ctx, e.manifestLoader, e.config)
+	if err != nil {
+		log.Errorf(ctx, err, "OPAPolicyChecker: network policy reload failed (keeping previous policies): %v", err)
+		return
+	}
+
+	e.evaluatorMu.Lock()
+	e.policies = policies
+	e.defaultPolicy = defaultPolicy
+	e.evaluatorMu.Unlock()
+
+	log.Infof(ctx, "OPAPolicyChecker: network policies reloaded in %s (policies=%d, hasDefault=%t)", time.Since(start), len(policies), defaultPolicy != nil)
+}
+
+func (e *PolicyEnforcer) selectedPolicy(networkID string) *loadedPolicy {
+	e.evaluatorMu.RLock()
+	defer e.evaluatorMu.RUnlock()
+
+	if networkID != "" {
+		if policy, ok := e.policies[networkID]; ok {
+			return policy
+		}
+	}
+	if e.defaultPolicy != nil {
+		return e.defaultPolicy
+	}
+	return nil
+}
+
+// CheckPolicy evaluates the message body against loaded OPA policies.
+// Returns a 400 *model.CodedErr (causing NACK) for every failure mode — an
+// uninitialized evaluator, an evaluation failure, or actual violations —
+// each classified with a POL_* code. Violations use the first non-empty
+// per-violation code (falling back to POL_GENERIC_ERROR when the policy only
+// emits plain violation strings — see evaluator.go's parseViolationItem for
+// the structured/coded shape a Rego policy can opt into); the other two
+// failure modes always use POL_GENERIC_ERROR, since they're evaluation-layer
+// failures rather than a specific policy decision.
+func (e *PolicyEnforcer) CheckPolicy(ctx *model.StepContext) error {
+	if !e.config.Enabled {
+		log.Debug(ctx, "OPAPolicyChecker: plugin disabled, skipping")
+		return nil
+	}
+
+	reqCtx := parseRequestContext(ctx.Body)
+	policy := e.selectedPolicy(reqCtx.NetworkID)
+	if policy == nil {
+		log.Debugf(ctx, "OPAPolicyChecker: no matching network policy for networkID=%q and no default configured, skipping", reqCtx.NetworkID)
+		return nil
+	}
+	policyConfig := policy.config
+
+	if !policyConfig.Enabled {
+		log.Debug(ctx, "OPAPolicyChecker: selected policy is disabled, skipping")
+		return nil
+	}
+
+	// Disabled policies intentionally do not initialize an evaluator in loadPolicy.
+	ev := policy.evaluator
+	if ev == nil {
+		return model.NewBadReqErr("POL_GENERIC_ERROR", fmt.Errorf("policy evaluator is not initialized"))
+	}
+
+	if e.config.DebugLogging {
+		log.Debugf(ctx, "OPAPolicyChecker: evaluating policy for networkID=%q action=%q (modules=%v)", reqCtx.NetworkID, reqCtx.Action, ev.ModuleNames())
+	}
+
+	requestLogCtx := formatRequestLogContext(reqCtx)
+
+	violations, err := ev.Evaluate(ctx, ctx.Body)
+	if err != nil {
+		log.Errorf(ctx, err, "OPAPolicyChecker: policy evaluation failed for networkID=%q%s: %v", reqCtx.NetworkID, requestLogCtx, err)
+		return model.NewBadReqErr("POL_GENERIC_ERROR", fmt.Errorf("policy evaluation error: %w", err))
+	}
+
+	if len(violations) == 0 {
+		if e.config.DebugLogging {
+			log.Debugf(ctx, "OPAPolicyChecker: message compliant for action %q", reqCtx.Action)
+		}
+		return nil
+	}
+
+	msg := fmt.Sprintf("policy violation(s): %s", strings.Join(violationMessages(violations), "; "))
+	log.Warnf(ctx, "OPAPolicyChecker: networkID=%q%s %s", reqCtx.NetworkID, requestLogCtx, msg)
+	code := model.FirstNonEmptyCode(violations, "POL_GENERIC_ERROR")
+	return model.NewBadReqErr(code, fmt.Errorf("%s", msg))
+}
+
+// violationMessages extracts each violation's human-readable message, in order.
+func violationMessages(violations []model.Error) []string {
+	messages := make([]string, len(violations))
+	for i, v := range violations {
+		messages[i] = v.Message
+	}
+	return messages
+}
+
+func (e *PolicyEnforcer) Close() {
+	e.closeOnce.Do(func() {
+		close(e.done)
+	})
+}
+
+type parsedRequestContext struct {
+	NetworkID     string
+	BAPID         string
+	BPPID         string
+	MessageID     string
+	TransactionID string
+	Action        string
+	Timestamp     string
+}
+
+func parseRequestContext(body []byte) parsedRequestContext {
+	var payload struct {
+		Context map[string]interface{} `json:"context"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Context == nil {
+		return parsedRequestContext{}
+	}
+
+	get := func(keys ...string) string {
+		for _, key := range keys {
+			if v, ok := payload.Context[key].(string); ok && v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+
+	return parsedRequestContext{
+		NetworkID:     get("network_id", "networkId"),
+		BAPID:         get("bap_id", "bapId", "senderId"),
+		BPPID:         get("bpp_id", "bppId", "receiverId"),
+		MessageID:     get("message_id", "messageId"),
+		TransactionID: get("transaction_id", "transactionId"),
+		Action:        get("action", "action"), // "action" has no camelCase variant
+		Timestamp:     get("timestamp", "timestamp"), // "timestamp" has no camelCase variant
+	}
+}
+
+func formatRequestLogContext(ctx parsedRequestContext) string {
+	parts := make([]string, 0, 6)
+	if ctx.BAPID != "" {
+		parts = append(parts, fmt.Sprintf("sender_id=%q", ctx.BAPID))
+	}
+	if ctx.BPPID != "" {
+		parts = append(parts, fmt.Sprintf("receiver_id=%q", ctx.BPPID))
+	}
+	if ctx.MessageID != "" {
+		parts = append(parts, fmt.Sprintf("message_id=%q", ctx.MessageID))
+	}
+	if ctx.TransactionID != "" {
+		parts = append(parts, fmt.Sprintf("transaction_id=%q", ctx.TransactionID))
+	}
+	if ctx.Action != "" {
+		parts = append(parts, fmt.Sprintf("action=%q", ctx.Action))
+	}
+	if ctx.Timestamp != "" {
+		parts = append(parts, fmt.Sprintf("timestamp=%q", ctx.Timestamp))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " " + strings.Join(parts, " ")
+}
+

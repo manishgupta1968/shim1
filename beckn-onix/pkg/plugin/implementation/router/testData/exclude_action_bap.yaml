@@ -1,0 +1,10 @@
+routingRules:
+  - domain: ONDC:TRV10
+    version: 1.1.0
+    targetType: bap
+    target:
+      url: https://mock_bap.com/v2/ondc
+      excludeAction: true
+    endpoints:
+      - search
+      - init
