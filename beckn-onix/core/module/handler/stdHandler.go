@@ -268,7 +268,7 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 	r.Body.Close()
 	body := bodyBuffer.Bytes()
 	subID := h.subID(r.Context())
-	protocolVersion := extractProtocolVersion(body)
+	protocolVersion, isONDC := extractProtocolVersion(body)
 	messageID := extractMessageID(body)
 	action := extractBecknAction(body)
 	direction := deriveDirection(h.role, action)
@@ -280,6 +280,8 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 	// sendAck) can read them without needing StepContext.
 	ctx := context.WithValue(r.Context(), model.ContextKeyProtocolVersion, protocolVersion)
 	ctx = context.WithValue(ctx, model.ContextKeyMsgID, messageID)
+	// ONDC requests (context.core_version) get the ONDC-style NACK body.
+	ctx = context.WithValue(ctx, model.ContextKeyONDC, isONDC)
 	return &model.StepContext{
 		Context:              ctx,
 		Request:              r,

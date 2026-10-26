@@ -1,0 +1,5 @@
+networkPolicies:
+  default:
+    type: file
+    location: ./config/shim1/ondc-policy.rego
+    query: data.ondc.policy.result

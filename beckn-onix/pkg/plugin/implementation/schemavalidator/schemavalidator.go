@@ -18,8 +18,9 @@ import (
 // Payload represents the structure of the data payload with context information.
 type payload struct {
 	Context struct {
-		Domain  string `json:"domain"`
-		Version string `json:"version"`
+		Domain      string `json:"domain"`
+		Version     string `json:"version"`
+		CoreVersion string `json:"core_version"` // ONDC / Beckn 1.x spelling
 	} `json:"context"`
 }
 
@@ -77,13 +78,16 @@ func (v *schemaValidator) Validate(ctx context.Context, reqURL *url.URL, data []
 	if payloadData.Context.Domain == "" {
 		return model.NewBadReqErr("", fmt.Errorf("missing field Domain in context"))
 	}
-	if payloadData.Context.Version == "" {
+	version := payloadData.Context.Version
+	if version == "" {
+		version = payloadData.Context.CoreVersion
+	}
+	if version == "" {
 		return model.NewBadReqErr("", fmt.Errorf("missing field Version in context"))
 	}
 
 	// Extract domain and version from the payload; use reqURL.Path as the endpoint action.
 	cxtDomain := payloadData.Context.Domain
-	version := payloadData.Context.Version
 	version = fmt.Sprintf("v%s", version)
 
 	endpoint := reqURL.Path

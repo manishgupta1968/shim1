@@ -13,3 +13,23 @@ Requirements: Go (the version named in `beckn-onix/go.mod`), `unzip`, and Redis
 (needed only when the `cache` plugin is used).
 
 The build output (`server`, `plugins/`, `schemas/`) is ignored by Git.
+
+## Shim 1: ONDC request pre-processing
+
+Shim 1 is ONIX set up as an ONDC seller app. When a request such as `/search` arrives,
+Shim 1 checks the signatures, the sender's role in the Registry, the mandatory fields,
+the schema, the age of the request and repeats. Only then does it hand the request to
+the seller's business logic.
+
+Run the demo (the first run builds everything and takes a few minutes):
+
+```bash
+./run-shim1-demo.sh               # or add --skip-build after the first run
+```
+
+It sends one good `/search` and 16 bad requests, and prints PASS or FAIL for each.
+
+The ONDC Registry and Gateway are not available to us, so they are stubbed, along with
+the schemas and the seller's backend. See [docs/ondc-preprocessing.md](docs/ondc-preprocessing.md)
+for the full list of checks, what comes from ONIX, what is new, and what to confirm
+before going live.
