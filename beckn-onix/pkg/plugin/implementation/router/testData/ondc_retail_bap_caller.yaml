@@ -1,0 +1,15 @@
+routingRules:
+  - domain: ONDC:RET14
+    version: 1.2.5
+    targetType: url
+    target:
+      url: https://gateway.example.com/bg
+    endpoints:
+      - search
+  - domain: ONDC:RET14
+    version: 1.2.5
+    targetType: bpp
+    endpoints:
+      - select
+      - init
+      - confirm

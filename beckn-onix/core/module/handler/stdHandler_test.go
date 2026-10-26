@@ -1333,3 +1333,28 @@ func TestProxy_QueryParamsForwardedToUpstream(t *testing.T) {
 		t.Errorf("upstream received RawQuery = %q, want %q", capturedRawQuery, "subscriptionId=test123&page=2")
 	}
 }
+
+func TestExtractProtocolVersionAndDomain(t *testing.T) {
+	tests := []struct {
+		name        string
+		body        string
+		wantVersion string
+		wantDomain  string
+	}{
+		{"version only", `{"context":{"domain":"ONDC:TRV10","version":"2.0.0"}}`, "2.0.0", "ONDC:TRV10"},
+		{"core_version only (ONDC Retail)", `{"context":{"domain":"ONDC:RET14","core_version":"1.2.5"}}`, "1.2.5", "ONDC:RET14"},
+		{"version wins over core_version", `{"context":{"version":"2.0.0","core_version":"1.2.5"}}`, "2.0.0", ""},
+		{"neither", `{"context":{"action":"search"}}`, "", ""},
+		{"not JSON", `nope`, "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractProtocolVersion([]byte(tt.body)); got != tt.wantVersion {
+				t.Errorf("extractProtocolVersion() = %q, want %q", got, tt.wantVersion)
+			}
+			if got := extractDomain([]byte(tt.body)); got != tt.wantDomain {
+				t.Errorf("extractDomain() = %q, want %q", got, tt.wantDomain)
+			}
+		})
+	}
+}

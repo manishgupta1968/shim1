@@ -247,7 +247,7 @@ func (h *stdHandler) signNackResponse(ctx *model.StepContext, err error) {
 	if h.ackSigner == nil {
 		return
 	}
-	if !model.IsAtLeastV2(ctx.ProtocolVersion) {
+	if !ctx.IsBecknV2() {
 		return
 	}
 	if len(ctx.SubID) == 0 {
@@ -269,6 +269,7 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 	body := bodyBuffer.Bytes()
 	subID := h.subID(r.Context())
 	protocolVersion := extractProtocolVersion(body)
+	domain := extractDomain(body)
 	messageID := extractMessageID(body)
 	action := extractBecknAction(body)
 	direction := deriveDirection(h.role, action)
@@ -279,6 +280,7 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 	// functions that only receive a context.Context (e.g. sendNack,
 	// sendAck) can read them without needing StepContext.
 	ctx := context.WithValue(r.Context(), model.ContextKeyProtocolVersion, protocolVersion)
+	ctx = context.WithValue(ctx, model.ContextKeyDomain, domain)
 	ctx = context.WithValue(ctx, model.ContextKeyMsgID, messageID)
 	return &model.StepContext{
 		Context:              ctx,
@@ -288,6 +290,7 @@ func (h *stdHandler) stepCtx(r *http.Request, rh http.Header) (*model.StepContex
 		SubID:                subID,
 		RespHeader:           rh,
 		ProtocolVersion:      protocolVersion,
+		Domain:               domain,
 		MessageID:            messageID,
 		InboundAuthSignature: inboundAuthSignature,
 		IsCallerHandler:      direction == DirectionCaller,

@@ -415,3 +415,66 @@ func TestValidatorNewFailure(t *testing.T) {
 		})
 	}
 }
+
+// TestValidator_Validate_CoreVersionFallback tests that ONDC Retail payloads, which
+// carry the protocol version in core_version rather than version, find their schema.
+func TestValidator_Validate_CoreVersionFallback(t *testing.T) {
+	schemaDir := t.TempDir()
+	schemaPath := filepath.Join(schemaDir, "ondc_ret14", "v1.2.5", "search.json")
+	if err := os.MkdirAll(filepath.Dir(schemaPath), 0755); err != nil {
+		t.Fatalf("MkdirAll() err = %v", err)
+	}
+	schema := `{
+		"type": "object",
+		"properties": {"context": {"type": "object", "required": ["domain", "core_version"]}},
+		"required": ["context"]
+	}`
+	if err := os.WriteFile(schemaPath, []byte(schema), 0644); err != nil {
+		t.Fatalf("WriteFile() err = %v", err)
+	}
+
+	v, _, err := New(context.Background(), &Config{SchemaDir: schemaDir})
+	if err != nil {
+		t.Fatalf("Failed to create validator: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		payload string
+		wantErr string
+	}{
+		{
+			name:    "core_version is used when version is absent",
+			payload: `{"context": {"domain": "ONDC:RET14", "core_version": "1.2.5", "action": "search"}}`,
+		},
+		{
+			name:    "version wins over core_version",
+			payload: `{"context": {"domain": "ONDC:RET14", "version": "1.2.5", "core_version": "9.9.9", "action": "search"}}`,
+		},
+		{
+			name:    "no version and no core_version",
+			payload: `{"context": {"domain": "ONDC:RET14", "action": "search"}}`,
+			wantErr: "missing field Version in context",
+		},
+		{
+			name:    "unknown core_version finds no schema",
+			payload: `{"context": {"domain": "ONDC:RET14", "core_version": "9.9.9", "action": "search"}}`,
+			wantErr: "schema not found for domain: ondc_ret14",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := v.Validate(context.Background(), &url.URL{Path: "search"}, []byte(tt.payload))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("Validate() err = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() err = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}

@@ -20,6 +20,9 @@ type payload struct {
 	Context struct {
 		Domain  string `json:"domain"`
 		Version string `json:"version"`
+		// CoreVersion is used when Version is absent: ONDC Retail (1.2.x)
+		// carries its protocol version in core_version.
+		CoreVersion string `json:"core_version"`
 	} `json:"context"`
 }
 
@@ -77,13 +80,16 @@ func (v *schemaValidator) Validate(ctx context.Context, reqURL *url.URL, data []
 	if payloadData.Context.Domain == "" {
 		return model.NewBadReqErr("", fmt.Errorf("missing field Domain in context"))
 	}
-	if payloadData.Context.Version == "" {
+	version := payloadData.Context.Version
+	if version == "" {
+		version = payloadData.Context.CoreVersion
+	}
+	if version == "" {
 		return model.NewBadReqErr("", fmt.Errorf("missing field Version in context"))
 	}
 
 	// Extract domain and version from the payload; use reqURL.Path as the endpoint action.
 	cxtDomain := payloadData.Context.Domain
-	version := payloadData.Context.Version
 	version = fmt.Sprintf("v%s", version)
 
 	endpoint := reqURL.Path

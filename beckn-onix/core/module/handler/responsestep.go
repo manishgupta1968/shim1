@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/beckn-one/beckn-onix/pkg/log"
@@ -106,6 +107,18 @@ func nackBecknError(ctx context.Context, err error) (*model.Error, int, model.St
 // to the wire.
 func nackBodyBytes(ctx context.Context, becknErr *model.Error, bodyStatus model.Status) []byte {
 	var data []byte
+	if isONDC(ctx) {
+		resp := &ondcResponse{}
+		resp.Message.Ack = preV2Ack{Status: bodyStatus}
+		if becknErr != nil {
+			resp.Error = &ondcError{Type: ondcErrorType(becknErr.Code), Code: becknErr.Code, Message: becknErr.Message}
+			if becknErr.Details != nil {
+				resp.Error.Path = becknErr.Details.Path
+			}
+		}
+		data, _ = json.Marshal(resp)
+		return data
+	}
 	if isAtLeastV2(ctx) {
 		resp := &model.Response{
 			Message: model.Message{
@@ -160,10 +173,51 @@ func sendNack(ctx context.Context, w http.ResponseWriter, err error) []byte {
 	return nack(ctx, w, becknErr, httpStatus, bodyStatus)
 }
 
-// isAtLeastV2 reports whether the request uses Beckn protocol v2.0.0 or later.
+// isAtLeastV2 reports whether the request uses Beckn protocol v2.0.0 or later
+// behaviour. ONDC domains are excluded even when their version is >= 2 (ONDC
+// TRV10 is version 2.0.0 on Beckn core 1.1.0), so they keep the Beckn 1.x envelope.
 func isAtLeastV2(ctx context.Context) bool {
 	v, _ := ctx.Value(model.ContextKeyProtocolVersion).(string)
-	return model.IsAtLeastV2(v)
+	return model.IsAtLeastV2(v) && !isONDC(ctx)
+}
+
+// isONDC reports whether the request's context.domain is an ONDC domain.
+func isONDC(ctx context.Context) bool {
+	d, _ := ctx.Value(model.ContextKeyDomain).(string)
+	return model.IsONDCDomain(d)
+}
+
+// ondcErrorType maps an ONIX error code onto the ONDC error "type" classes.
+func ondcErrorType(code string) string {
+	switch {
+	case strings.HasPrefix(code, "AUT_"):
+		return "CONTEXT-ERROR"
+	case strings.HasPrefix(code, "SCH_"):
+		return "JSON-SCHEMA-ERROR"
+	case strings.HasPrefix(code, "POL_"):
+		return "POLICY-ERROR"
+	default:
+		return "CORE-ERROR"
+	}
+}
+
+// ondcError is the ONDC error object, placed at the top level of a NACK
+// alongside "message" (Beckn 1.x / ONDC wire format).
+type ondcError struct {
+	Type    string `json:"type"`
+	Code    string `json:"code"`
+	Path    string `json:"path,omitempty"`
+	Message string `json:"message"`
+}
+
+// ondcResponse is the ONDC NACK envelope:
+//
+//	{"message":{"ack":{"status":"NACK"}},"error":{"type":"...","code":"...","message":"..."}}
+type ondcResponse struct {
+	Message struct {
+		Ack preV2Ack `json:"ack"`
+	} `json:"message"`
+	Error *ondcError `json:"error,omitempty"`
 }
 
 // msgID returns the message ID stored in the context, or empty string if absent.
@@ -251,7 +305,7 @@ func (a *ackSignerStep) signBodyAndSetHeader(ctx *model.StepContext, body []byte
 // (called before sendNack) because the pipelineErr guard prevents
 // response steps from running on pipeline failures.
 func (a *ackSignerStep) RunOnResponse(ctx *model.StepContext, rctx *model.ResponseStepContext) error {
-	if !model.IsAtLeastV2(ctx.ProtocolVersion) {
+	if !ctx.IsBecknV2() {
 		return nil
 	}
 	if len(ctx.SubID) == 0 {
@@ -366,7 +420,7 @@ func (v *validateAckSignatureStep) RunOnResponse(ctx *model.StepContext, rctx *m
 	if rctx == nil {
 		return nil
 	}
-	if !model.IsAtLeastV2(ctx.ProtocolVersion) {
+	if !ctx.IsBecknV2() {
 		return nil
 	}
 

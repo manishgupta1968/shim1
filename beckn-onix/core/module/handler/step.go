@@ -180,6 +180,7 @@ func (s *validateSignStep) Run(ctx *model.StepContext) error {
 		RespHeader:      ctx.RespHeader,
 		Route:           ctx.Route,
 		ProtocolVersion: ctx.ProtocolVersion,
+		Domain:          ctx.Domain,
 		MessageID:       ctx.MessageID,
 	}
 	err := s.validateHeaders(stepCtx)
@@ -234,7 +235,7 @@ func (s *validateSignStep) validateHeaders(ctx *model.StepContext) error {
 //   - "request-signature" absent from the Authorization headers attribute (provider-initiated)
 //   - action cannot be extracted from the body
 func (s *validateSignStep) lookupCallbackRequestSig(ctx *model.StepContext, authHeader string) (string, error) {
-	if s.payloadStore == nil || !model.IsAtLeastV2(ctx.ProtocolVersion) || !authHeaderIncludesRequestSig(authHeader) {
+	if s.payloadStore == nil || !ctx.IsBecknV2() || !authHeaderIncludesRequestSig(authHeader) {
 		return "", nil
 	}
 	action := strings.TrimPrefix(extractBecknAction(ctx.Body), "on_")
@@ -462,11 +463,30 @@ func extractProtocolVersion(body []byte) string {
 	type contextEnvelope struct {
 		Context struct {
 			Version string `json:"version"`
+			// CoreVersion is the ONDC Retail (1.2.x) name for the protocol version.
+			CoreVersion string `json:"core_version"`
 		} `json:"context"`
 	}
 	var payload contextEnvelope
 	if err := json.Unmarshal(body, &payload); err == nil {
-		return payload.Context.Version
+		if payload.Context.Version != "" {
+			return payload.Context.Version
+		}
+		return payload.Context.CoreVersion
+	}
+	return ""
+}
+
+// extractDomain returns context.domain from the request body, or "" when absent.
+func extractDomain(body []byte) string {
+	type contextEnvelope struct {
+		Context struct {
+			Domain string `json:"domain"`
+		} `json:"context"`
+	}
+	var payload contextEnvelope
+	if err := json.Unmarshal(body, &payload); err == nil {
+		return payload.Context.Domain
 	}
 	return ""
 }
